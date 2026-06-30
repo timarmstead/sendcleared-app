@@ -10,43 +10,35 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    // Get raw body text first to handle different content types
     const contentType = req.headers.get('content-type') || ''
-    let body: any = {}
+    let body: Record<string, string> = {}
 
     if (contentType.includes('application/json')) {
       body = await req.json()
-    } else if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
+    } else {
       const formData = await req.formData()
       formData.forEach((value, key) => {
-        body[key] = value
+        body[key] = value.toString()
       })
-    } else {
-      // Try JSON first, fall back to text
-      const text = await req.text()
-      try {
-        body = JSON.parse(text)
-      } catch {
-        body = { raw: text }
-      }
     }
 
     console.log('Inbound body keys:', Object.keys(body))
 
-    // Extract to address from various possible locations
-    const toAddress = 
-      body?.envelope?.to ||
-      body?.headers?.to ||
-      body?.to ||
+    // CloudMailin sends flat form keys like 'envelope[to]'
+    const toAddress =
+      body['envelope[to]'] ||
+      body['envelope[recipients][0]'] ||
+      body['headers[to]'] ||
       ''
 
     console.log('To address:', toAddress)
 
     if (!toAddress) {
-      return NextResponse.json({ error: 'No recipient address' }, { status: 200 })
+      console.log('No to address found')
+      return NextResponse.json({ message: 'No recipient' }, { status: 200 })
     }
 
-    // Normalise the to address
+    // Extract just the email address
     const toMatch = toAddress.match(/([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/)
     const inboxAddress = toMatch ? toMatch[1].toLowerCase() : toAddress.toLowerCase()
 
@@ -64,14 +56,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: 'Unknown inbox address' }, { status: 200 })
     }
 
-    // Extract email parts
-    const subject = body?.headers?.subject || body?.subject || ''
-    const from = body?.envelope?.from || body?.headers?.from || body?.from || ''
-    const html = body?.html || body?.parts?.find((p: any) => p.content_type?.includes('text/html'))?.body || ''
-    const plainText = body?.plain || body?.parts?.find((p: any) => p.content_type?.includes('text/plain'))?.body || ''
+    console.log('Client found:', client.name)
+
+    // Extract email parts from flat keys
+    const subject = body['headers[subject]'] || ''
+    const from = body['envelope[from]'] || body['headers[from]'] || ''
+    const html = body['html'] || ''
+    const plainText = body['plain'] || ''
 
     // Parse for preheader and links
-    const parsed = parseEmail(plainText || html || JSON.stringify(body))
+    const parsed = parseEmail(html || plainText)
     const preheader = parsed.preheader || ''
     const links = parsed.links || []
 
@@ -94,6 +88,8 @@ export async function POST(req: NextRequest) {
       console.error('Campaign insert error:', campaignError)
       return NextResponse.json({ error: 'Failed to store campaign' }, { status: 500 })
     }
+
+    console.log('Campaign stored:', campaign.id)
 
     // Run the QA engine
     const qaResult = await runQA({ subject, from, preheader, html, plainText, links })

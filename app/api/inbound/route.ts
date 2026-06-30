@@ -3,7 +3,6 @@ import { createClient } from '@supabase/supabase-js'
 import { parseEmail } from '@/lib/parseEmail'
 import { runQA } from '@/lib/qaEngine'
 
-// Use service role key for server-side operations
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -11,19 +10,47 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
+    // Get raw body text first to handle different content types
+    const contentType = req.headers.get('content-type') || ''
+    let body: any = {}
 
-    // CloudMailin sends the raw email as plain or the parsed version
-    const rawEmail = body.plain || body.html || ''
-    const toAddress = body.envelope?.to || body.headers?.to || ''
-
-    if (!toAddress) {
-      return NextResponse.json({ error: 'No recipient address' }, { status: 400 })
+    if (contentType.includes('application/json')) {
+      body = await req.json()
+    } else if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
+      const formData = await req.formData()
+      formData.forEach((value, key) => {
+        body[key] = value
+      })
+    } else {
+      // Try JSON first, fall back to text
+      const text = await req.text()
+      try {
+        body = JSON.parse(text)
+      } catch {
+        body = { raw: text }
+      }
     }
 
-    // Normalise the to address — extract just the email
-    const toMatch = toAddress.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/)
+    console.log('Inbound body keys:', Object.keys(body))
+
+    // Extract to address from various possible locations
+    const toAddress = 
+      body?.envelope?.to ||
+      body?.headers?.to ||
+      body?.to ||
+      ''
+
+    console.log('To address:', toAddress)
+
+    if (!toAddress) {
+      return NextResponse.json({ error: 'No recipient address' }, { status: 200 })
+    }
+
+    // Normalise the to address
+    const toMatch = toAddress.match(/([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/)
     const inboxAddress = toMatch ? toMatch[1].toLowerCase() : toAddress.toLowerCase()
+
+    console.log('Inbox address:', inboxAddress)
 
     // Find which client this inbox belongs to
     const { data: client, error: clientError } = await supabase
@@ -34,22 +61,17 @@ export async function POST(req: NextRequest) {
 
     if (clientError || !client) {
       console.log('No client found for address:', inboxAddress)
-      // Return 200 so CloudMailin doesn't retry — we just don't know this address
       return NextResponse.json({ message: 'Unknown inbox address' }, { status: 200 })
     }
 
-    // Parse the email
-    const parsed = parseEmail(
-      body.plain ||
-      (body.parts ? body.parts.map((p: any) => p.body).join('\n') : '') ||
-      JSON.stringify(body)
-    )
+    // Extract email parts
+    const subject = body?.headers?.subject || body?.subject || ''
+    const from = body?.envelope?.from || body?.headers?.from || body?.from || ''
+    const html = body?.html || body?.parts?.find((p: any) => p.content_type?.includes('text/html'))?.body || ''
+    const plainText = body?.plain || body?.parts?.find((p: any) => p.content_type?.includes('text/plain'))?.body || ''
 
-    // Override with CloudMailin's pre-parsed fields if available
-    const subject = body.headers?.subject || parsed.subject || ''
-    const from = body.envelope?.from || parsed.from || ''
-    const html = body.html || parsed.html || ''
-    const plainText = body.plain || parsed.plainText || ''
+    // Parse for preheader and links
+    const parsed = parseEmail(plainText || html || JSON.stringify(body))
     const preheader = parsed.preheader || ''
     const links = parsed.links || []
 

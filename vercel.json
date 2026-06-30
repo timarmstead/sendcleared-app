@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "app/api/inbound/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

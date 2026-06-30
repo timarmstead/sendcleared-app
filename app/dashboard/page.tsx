@@ -52,10 +52,10 @@ export default function Dashboard() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    // Generate inbox address from client name + user id snippet
+    // Generate unique inbox address at check.sendcleared.com
     const slug = newClientName.toLowerCase().replace(/[^a-z0-9]/g, '')
-    const userSnippet = user.id.substring(0, 6)
-    const inboxAddress = `${slug}@${userSnippet}.check.sendcleared.com`
+    const randomToken = Math.random().toString(36).substring(2, 6)
+    const inboxAddress = `${slug}-${randomToken}@check.sendcleared.com`
 
     const { error } = await supabase.from('clients').insert({
       user_id: user.id,
@@ -123,7 +123,12 @@ export default function Dashboard() {
       </div>
 
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '2.5rem 2rem' }}>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#134e8e', marginBottom: '.5rem' }}>
+        <h1 style={{
+          fontSize: '1.75rem',
+          fontWeight: 800,
+          color: '#134e8e',
+          marginBottom: '.5rem',
+        }}>
           Your clients
         </h1>
         <p style={{ fontSize: '14px', color: '#5a5a56', marginBottom: '2rem' }}>
@@ -203,10 +208,19 @@ export default function Dashboard() {
                 }}
               >
                 <div>
-                  <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117', marginBottom: '2px' }}>
+                  <p style={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#0f1117',
+                    marginBottom: '2px',
+                  }}>
                     {client.name}
                   </p>
-                  <p style={{ fontSize: '12px', color: '#f26600', fontFamily: 'monospace' }}>
+                  <p style={{
+                    fontSize: '12px',
+                    color: '#f26600',
+                    fontFamily: 'monospace',
+                  }}>
                     {client.inbox_address}
                   </p>
                 </div>

@@ -4,6 +4,16 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 })
 
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .substring(0, 2000)
+}
+
 export async function runQA(email: {
   subject: string
   from: string
@@ -12,54 +22,62 @@ export async function runQA(email: {
   plainText: string
   links: string[]
 }) {
+  // Truncate HTML safely to avoid JSON parse errors
+  const htmlSample = email.html.substring(0, 4000)
+  const textSample = stripHtml(email.html).substring(0, 1000)
+
   const meta = [
     email.subject ? `Subject line: "${email.subject}"` : '',
     email.from ? `From: ${email.from}` : '',
-    email.preheader ? `Preheader: "${email.preheader}"` : '',
-    email.plainText ? `Plain text version: present` : `Plain text version: MISSING`,
+    email.preheader ? `Preheader: "${email.preheader}"` : 'Preheader: NOT SET',
+    email.plainText ? 'Plain text version: present' : 'Plain text version: MISSING',
     email.links.length
-      ? `Links found (${email.links.length}): ${email.links.slice(0, 10).join(', ')}`
+      ? `Links found (${email.links.length}): ${email.links.slice(0, 8).join(', ')}`
       : 'No links found',
+    textSample ? `Email text content: ${textSample}` : '',
   ]
     .filter(Boolean)
     .join('\n')
 
-  const prompt = `You are SendCleared, an expert email marketing QA agent. Analyse this email and return ONLY a raw JSON object — no markdown, no explanation.
+  const prompt = `You are SendCleared, an expert email marketing QA agent. Analyse this email and return ONLY a valid JSON object. No markdown, no backticks, no explanation — raw JSON only.
 
 ${meta}
 
-Return exactly this structure:
+Return exactly this JSON structure:
 {
-  "score": <integer 0-100>,
-  "summary": "<2-3 sentence plain English summary for an agency to share with their client>",
+  "score": 75,
+  "summary": "Two sentence summary here.",
   "sections": [
     {
-      "name": "<section name>",
-      "score": <integer 0-100>,
+      "name": "Content & copy",
+      "score": 80,
       "issues": [
-        { "severity": "critical|warning|info|pass", "text": "<specific actionable finding>" }
+        { "severity": "pass", "text": "Finding here." }
       ]
     }
   ]
 }
 
-Sections must be exactly: "Content & copy", "Links & tracking", "Accessibility", "Spam signals", "Rendering readiness".
-Each section needs 3-4 issues. Be specific — reference actual content, attributes, and patterns.
+Rules:
+- score is an integer 0-100
+- sections must be exactly these 5 names: "Content & copy", "Links & tracking", "Accessibility", "Spam signals", "Rendering readiness"
+- each section has 3-4 issues
+- severity is one of: critical, warning, info, pass
+- all strings must be properly escaped JSON — no unescaped quotes or special characters
+- be specific but keep each issue text under 120 characters
 
 Check for:
-- Unresolved merge/template tags: \${...} {{...}} — CRITICAL if found
-- Empty or missing alt text on non-decorative images — WARNING
-- Links without UTM parameters — WARNING
-- Preheader text quality (ideal 40-90 chars) — check if meaningful
-- Subject line length (ideal 30-50 chars) and spam trigger words
-- Unsubscribe link present — CRITICAL if missing
-- Physical address in footer — CRITICAL if missing
-- Plain text version — WARNING if absent
-- Image-to-text ratio — WARNING if too image-heavy
-- CTA button text — clear and action-oriented?
+- Unresolved merge tags like \${...} or {{...}} — critical
+- Missing UTM parameters on links — warning  
+- Empty alt text on images — warning
+- Subject line length and spam words
+- Unsubscribe link present — critical if missing
+- Physical address in footer — critical if missing
+- Plain text version missing — warning
+- CTA clarity
 
-Email HTML:
-${email.html.substring(0, 6000)}`
+HTML sample:
+${htmlSample}`
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
@@ -72,9 +90,16 @@ ${email.html.substring(0, 6000)}`
     .join('')
     .trim()
 
-  const start = raw.indexOf('{')
-  const end = raw.lastIndexOf('}')
+  // Clean any markdown formatting just in case
+  const cleaned = raw
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+
+  const start = cleaned.indexOf('{')
+  const end = cleaned.lastIndexOf('}')
   if (start === -1) throw new Error('No JSON in QA response')
 
-  return JSON.parse(raw.substring(start, end + 1))
+  return JSON.parse(cleaned.substring(start, end + 1))
 }

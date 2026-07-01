@@ -121,60 +121,51 @@ export default function ApprovalPage() {
     }
   }
 
-  const wrapStyle: React.CSSProperties = {
-    minHeight: '100vh',
-    background: '#f5f4f0',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    padding: '1.5rem 1rem',
-    color: '#0f1117',
+  function getScoreColor(score: number) {
+    if (score >= 80) return '#5a9020'
+    if (score >= 60) return '#b06d10'
+    return '#d94040'
   }
-  const pageStyle: React.CSSProperties = { maxWidth: '620px', margin: '0 auto' }
+
+  function TopBar() {
+    return (
+      <div style={{
+        background: '#f26600',
+        padding: '0 2rem',
+        height: '64px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <span style={{ color: '#fff', fontWeight: 700, fontSize: '17px' }}>SendCleared</span>
+      </div>
+    )
+  }
+
+  const shellStyle: React.CSSProperties = {
+    minHeight: '100vh',
+    background: '#f7f7f5',
+    fontFamily: '-apple-system, sans-serif',
+  }
+  const containerStyle: React.CSSProperties = {
+    maxWidth: '800px',
+    margin: '0 auto',
+    padding: '2.5rem 2rem',
+  }
   const cardStyle: React.CSSProperties = {
     background: '#fff',
-    border: '0.5px solid rgba(0,0,0,0.09)',
     borderRadius: '10px',
-    padding: '1.125rem 1.25rem',
-    marginBottom: '10px',
-  }
-  const labelStyle: React.CSSProperties = {
-    fontSize: '10px',
-    fontWeight: 600,
-    color: '#9a9891',
-    textTransform: 'uppercase',
-    letterSpacing: '0.07em',
-    marginBottom: '10px',
-  }
-
-  function Header() {
-    return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: '1.5rem',
-      }}>
-        <span style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117' }}>
-          Cleared<span style={{ fontWeight: 400, color: '#9a9891' }}>ToSend</span>
-        </span>
-      </div>
-    )
-  }
-
-  function Footer() {
-    return (
-      <div style={{
-        fontSize: '11px', color: '#9a9891', textAlign: 'center', marginTop: '14px',
-      }}>
-        Powered by <a href="https://sendcleared.com" style={{ color: 'inherit' }}>SendCleared</a>
-      </div>
-    )
+    border: '1px solid rgba(0,0,0,0.09)',
+    padding: '1rem 1.25rem',
+    marginBottom: '8px',
   }
 
   if (loading) {
     return (
-      <div style={wrapStyle}>
-        <div style={pageStyle}>
-          <Header />
-          <p>Loading…</p>
-          <Footer />
+      <div style={shellStyle}>
+        <TopBar />
+        <div style={containerStyle}>
+          <p style={{ color: '#9a9891', fontSize: '14px' }}>Loading…</p>
         </div>
       </div>
     )
@@ -182,13 +173,14 @@ export default function ApprovalPage() {
 
   if (notFound) {
     return (
-      <div style={wrapStyle}>
-        <div style={pageStyle}>
-          <Header />
-          <div style={cardStyle}>
-            <p style={{ fontSize: '14px' }}>This approval link isn't valid. Please check the link or contact your agency.</p>
+      <div style={shellStyle}>
+        <TopBar />
+        <div style={containerStyle}>
+          <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center' }}>
+            <p style={{ color: '#0f1117', fontSize: '14px' }}>
+              This approval link isn't valid. Please check the link or contact your agency.
+            </p>
           </div>
-          <Footer />
         </div>
       </div>
     )
@@ -196,13 +188,14 @@ export default function ApprovalPage() {
 
   if (approval?.is_expired) {
     return (
-      <div style={wrapStyle}>
-        <div style={pageStyle}>
-          <Header />
-          <div style={cardStyle}>
-            <p style={{ fontSize: '14px' }}>This approval link has expired. Please contact your agency for a new one.</p>
+      <div style={shellStyle}>
+        <TopBar />
+        <div style={containerStyle}>
+          <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center' }}>
+            <p style={{ color: '#0f1117', fontSize: '14px' }}>
+              This approval link has expired. Please contact your agency for a new one.
+            </p>
           </div>
-          <Footer />
         </div>
       </div>
     )
@@ -210,17 +203,17 @@ export default function ApprovalPage() {
 
   if (approval?.status === 'approved') {
     return (
-      <div style={wrapStyle}>
-        <div style={pageStyle}>
-          <Header />
+      <div style={shellStyle}>
+        <TopBar />
+        <div style={containerStyle}>
           <div style={{
             background: '#eaf3de',
-            border: '0.5px solid #5a9020',
-            borderRadius: '10px',
+            border: '1px solid #5a9020',
+            borderRadius: '12px',
             padding: '2rem',
             textAlign: 'center',
           }}>
-            <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#27500a', marginBottom: '4px' }}>
+            <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#27500a', marginBottom: '4px' }}>
               Email approved
             </h2>
             <p style={{ fontSize: '13px', color: '#27500a' }}>
@@ -231,7 +224,6 @@ export default function ApprovalPage() {
               Your agency has been notified and can now proceed with the send.
             </p>
           </div>
-          <Footer />
         </div>
       </div>
     )
@@ -239,13 +231,13 @@ export default function ApprovalPage() {
 
   if (approval?.status === 'changes_requested') {
     return (
-      <div style={wrapStyle}>
-        <div style={pageStyle}>
-          <Header />
+      <div style={shellStyle}>
+        <TopBar />
+        <div style={containerStyle}>
           <div style={{
             background: '#faeeda',
-            border: '0.5px solid #b06d10',
-            borderRadius: '10px',
+            border: '1px solid #b06d10',
+            borderRadius: '12px',
             padding: '1.5rem',
           }}>
             <p style={{ fontSize: '14px', color: '#5c3308' }}>
@@ -257,7 +249,6 @@ export default function ApprovalPage() {
               </p>
             )}
           </div>
-          <Footer />
         </div>
       </div>
     )
@@ -265,70 +256,146 @@ export default function ApprovalPage() {
 
   // Pending — full review UI
   return (
-    <div style={wrapStyle}>
-      <div style={pageStyle}>
-        <Header />
+    <div style={shellStyle}>
+      <TopBar />
+      <div style={containerStyle}>
 
-        {/* Campaign meta */}
-        <div style={cardStyle}>
-          <p style={labelStyle}>Campaign details</p>
-          <Row label="Subject line" value={campaign?.subject || '(no subject)'} />
-          <Row label="Preview text" value={campaign?.preheader || 'Not detected'} />
-          <Row label="From" value={campaign?.from_address || ''} />
-          <Row
-            label="Received"
-            value={campaign?.received_at ? new Date(campaign.received_at).toLocaleString() : ''}
-          />
+        {/* Campaign header, matching report page's title block */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          marginBottom: '1.5rem',
+          gap: '1rem',
+        }}>
+          <div>
+            <h1 style={{
+              fontSize: '1.4rem',
+              fontWeight: 800,
+              color: '#134e8e',
+              marginBottom: '4px',
+              letterSpacing: '-0.01em',
+            }}>
+              "{campaign?.subject || '(no subject)'}"
+            </h1>
+            <p style={{ fontSize: '13px', color: '#9a9891' }}>
+              From {campaign?.from_address} · {campaign?.received_at ? new Date(campaign.received_at).toLocaleString() : ''}
+            </p>
+            <p style={{ fontSize: '13px', color: '#5a5a56', marginTop: '4px' }}>
+              Preview text: {campaign?.preheader || 'Not detected'}
+            </p>
+          </div>
+          {report && (
+            <div style={{
+              width: '60px',
+              height: '60px',
+              borderRadius: '50%',
+              border: `3px solid ${getScoreColor(report.score)}`,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              background: '#fff',
+            }}>
+              <span style={{ fontSize: '18px', fontWeight: 700, color: '#0f1117', lineHeight: 1 }}>
+                {report.score}
+              </span>
+              <span style={{ fontSize: '9px', color: '#9a9891' }}>/100</span>
+            </div>
+          )}
         </div>
 
         {/* QA summary */}
         {report && (
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <p style={{ ...labelStyle, margin: 0 }}>QA check summary</p>
-              <div style={{
-                width: '46px', height: '46px', borderRadius: '50%',
-                border: `2.5px solid ${report.score >= 80 ? '#5a9020' : report.score >= 60 ? '#b06d10' : '#d94040'}`,
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <span style={{ fontSize: '17px', fontWeight: 600 }}>{report.score}</span>
-                <span style={{ fontSize: '9px', color: '#9a9891' }}>/100</span>
-              </div>
+          <>
+            <div style={{
+              background: '#fff',
+              borderLeft: '3px solid #5a9020',
+              borderRadius: '0 8px 8px 0',
+              padding: '12px 16px',
+              marginBottom: '12px',
+              fontSize: '14px',
+              color: '#0f1117',
+              lineHeight: 1.6,
+            }}>
+              {report.summary}
             </div>
-            {report.sections?.flatMap(s => s.issues).map((issue, i) => {
-              const badge = getBadgeStyle(issue.severity)
-              return (
-                <div key={i} style={{
-                  display: 'flex', gap: '9px', padding: '8px 0',
-                  borderBottom: '0.5px solid rgba(0,0,0,0.09)', fontSize: '13px', lineHeight: 1.45,
+
+            {report.sections?.map((section, i) => (
+              <div key={i} style={{ ...cardStyle, padding: '1rem 1.25rem' }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '6px',
                 }}>
-                  <span style={{
-                    background: badge.background, color: badge.color, fontSize: '10px', fontWeight: 700,
-                    padding: '2px 7px', borderRadius: '4px', whiteSpace: 'nowrap', flexShrink: 0, marginTop: '1px',
-                  }}>
-                    {badge.label}
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117' }}>
+                    {section.name}
                   </span>
-                  <span>{issue.text}</span>
+                  <span style={{ fontSize: '12px', color: '#9a9891' }}>
+                    {section.score}/100
+                  </span>
                 </div>
-              )
-            })}
-          </div>
+                <div style={{
+                  height: '3px',
+                  background: '#f0efe9',
+                  borderRadius: '2px',
+                  overflow: 'hidden',
+                  marginBottom: '10px',
+                }}>
+                  <div style={{
+                    width: `${section.score}%`,
+                    height: '100%',
+                    background: getScoreColor(section.score),
+                    borderRadius: '2px',
+                  }} />
+                </div>
+                {section.issues?.map((issue, j) => {
+                  const badge = getBadgeStyle(issue.severity)
+                  return (
+                    <div key={j} style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '8px',
+                      padding: '7px 0',
+                      borderBottom: j < section.issues.length - 1 ? '0.5px solid rgba(0,0,0,0.07)' : 'none',
+                      fontSize: '13px',
+                      color: '#0f1117',
+                      lineHeight: 1.45,
+                    }}>
+                      <span style={{
+                        background: badge.background,
+                        color: badge.color,
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                        marginTop: '1px',
+                      }}>
+                        {badge.label}
+                      </span>
+                      <span>{issue.text}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </>
         )}
 
         {/* Email preview */}
-        <div style={cardStyle}>
-          <p style={labelStyle}>Email preview</p>
+        <div style={{ ...cardStyle, padding: '1rem 1.25rem', marginTop: '8px' }}>
+          <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117', marginBottom: '10px' }}>
+            Email preview
+          </p>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-            <button
-              onClick={() => setView('desktop')}
-              style={toggleBtnStyle(view === 'desktop')}
-            >
+            <button onClick={() => setView('desktop')} style={toggleBtnStyle(view === 'desktop')}>
               Desktop
             </button>
-            <button
-              onClick={() => setView('mobile')}
-              style={toggleBtnStyle(view === 'mobile')}
-            >
+            <button onClick={() => setView('mobile')} style={toggleBtnStyle(view === 'mobile')}>
               Mobile
             </button>
           </div>
@@ -336,7 +403,7 @@ export default function ApprovalPage() {
             background: '#ebebeb',
             borderRadius: view === 'mobile' ? '20px' : '6px',
             padding: view === 'mobile' ? '12px' : '10px',
-            border: view === 'mobile' ? '3px solid #333' : '0.5px solid rgba(0,0,0,0.14)',
+            border: view === 'mobile' ? '3px solid #333' : '1px solid rgba(0,0,0,0.14)',
             maxWidth: view === 'mobile' ? '320px' : 'none',
             margin: view === 'mobile' ? '0 auto' : '0',
           }}>
@@ -354,42 +421,70 @@ export default function ApprovalPage() {
           </div>
         </div>
 
-        {/* Action panel */}
-        <div style={cardStyle}>
-          <p style={{ fontSize: '13px', fontWeight: 500, marginBottom: '8px' }}>Your name</p>
+        {/* Approval CTA — matches report page's blue action panel */}
+        <div style={{
+          background: '#134e8e',
+          borderRadius: '12px',
+          padding: '1.25rem',
+          marginTop: '1rem',
+        }}>
+          <p style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '10px' }}>
+            Review and approve this email
+          </p>
+
           <input
             type="text"
             value={name}
             onChange={e => setName(e.target.value)}
-            placeholder="e.g. Sarah Johnson"
+            placeholder="Your name"
             style={{
               width: '100%',
               padding: '9px 12px',
               fontSize: '13px',
-              borderRadius: '6px',
-              border: '0.5px solid rgba(0,0,0,0.14)',
-              background: '#f0efe9',
-              marginBottom: '12px',
+              borderRadius: '8px',
+              border: 'none',
+              marginBottom: '10px',
             }}
           />
 
           {actionError && (
-            <p style={{ color: '#791f1f', fontSize: '12px', marginBottom: '10px' }}>{actionError}</p>
+            <p style={{ color: '#ffb4b4', fontSize: '12px', marginBottom: '10px' }}>{actionError}</p>
           )}
 
           {!showChangesForm ? (
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <button
                 onClick={handleApprove}
                 disabled={!name.trim() || submitting}
-                style={actionBtnStyle(!name.trim() || submitting, 'approve')}
+                style={{
+                  background: (!name.trim() || submitting) ? '#8fd9ab' : '#4ade80',
+                  color: '#0f1117',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: (!name.trim() || submitting) ? 'default' : 'pointer',
+                  flex: 1,
+                }}
               >
                 {submitting ? 'Submitting…' : '✓ Approve to send'}
               </button>
               <button
                 onClick={() => setShowChangesForm(true)}
                 disabled={!name.trim() || submitting}
-                style={actionBtnStyle(!name.trim() || submitting, 'neutral')}
+                style={{
+                  background: 'rgba(255,255,255,0.12)',
+                  color: '#fff',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: (!name.trim() || submitting) ? 'default' : 'pointer',
+                  opacity: (!name.trim() || submitting) ? 0.5 : 1,
+                  flex: 1,
+                }}
               >
                 ↩ Request changes
               </button>
@@ -406,9 +501,8 @@ export default function ApprovalPage() {
                   fontSize: '13px',
                   fontFamily: 'inherit',
                   padding: '8px 10px',
-                  borderRadius: '6px',
-                  border: '0.5px solid rgba(0,0,0,0.14)',
-                  background: '#f0efe9',
+                  borderRadius: '8px',
+                  border: 'none',
                   resize: 'vertical',
                   marginBottom: '8px',
                 }}
@@ -417,11 +511,34 @@ export default function ApprovalPage() {
                 <button
                   onClick={handleSendChanges}
                   disabled={!changesText.trim() || submitting}
-                  style={actionBtnStyle(!changesText.trim() || submitting, 'amber')}
+                  style={{
+                    background: (!changesText.trim() || submitting) ? '#f2cf94' : '#fbbf24',
+                    color: '#0f1117',
+                    border: 'none',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: (!changesText.trim() || submitting) ? 'default' : 'pointer',
+                    flex: 1,
+                  }}
                 >
                   {submitting ? 'Sending…' : 'Send feedback'}
                 </button>
-                <button onClick={() => setShowChangesForm(false)} style={actionBtnStyle(false, 'neutral')}>
+                <button
+                  onClick={() => setShowChangesForm(false)}
+                  style={{
+                    background: 'rgba(255,255,255,0.12)',
+                    color: '#fff',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    flex: 1,
+                  }}
+                >
                   Cancel
                 </button>
               </div>
@@ -429,21 +546,7 @@ export default function ApprovalPage() {
           )}
         </div>
 
-        <Footer />
-
       </div>
-    </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{
-      display: 'flex', justifyContent: 'space-between', gap: '12px', padding: '5px 0',
-      borderBottom: '0.5px solid rgba(0,0,0,0.09)', fontSize: '13px',
-    }}>
-      <span style={{ color: '#5a5a56', flexShrink: 0 }}>{label}</span>
-      <span style={{ fontWeight: 500, textAlign: 'right' }}>{value}</span>
     </div>
   )
 }
@@ -454,29 +557,9 @@ function toggleBtnStyle(active: boolean): React.CSSProperties {
     fontSize: '12px',
     fontWeight: 500,
     borderRadius: '20px',
-    border: '0.5px solid rgba(0,0,0,0.14)',
+    border: '1px solid rgba(0,0,0,0.14)',
     background: active ? '#0f1117' : '#f0efe9',
     color: active ? '#fff' : '#5a5a56',
     cursor: 'pointer',
-  }
-}
-
-function actionBtnStyle(disabled: boolean, variant: 'approve' | 'amber' | 'neutral'): React.CSSProperties {
-  const colors = {
-    approve: { bg: '#eaf3de', color: '#27500a', border: '#5a9020' },
-    amber: { bg: '#faeeda', color: '#5c3308', border: '#b06d10' },
-    neutral: { bg: '#fff', color: '#0f1117', border: 'rgba(0,0,0,0.14)' },
-  }[variant]
-  return {
-    flex: 1,
-    padding: '10px 16px',
-    borderRadius: '6px',
-    fontSize: '13px',
-    fontWeight: 500,
-    border: `0.5px solid ${colors.border}`,
-    background: disabled ? '#f0efe9' : colors.bg,
-    color: disabled ? '#9a9891' : colors.color,
-    cursor: disabled ? 'default' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
   }
 }

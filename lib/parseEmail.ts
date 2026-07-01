@@ -12,32 +12,29 @@ export function extractHeader(raw: string, name: string): string {
 }
 
 export function extractPreheader(html: string): string {
-  // html should already be QP-decoded before calling this
+  // Must be called with DECODED html (after QP decoding)
   const patterns = [
-    // Standard hidden div — most ESPs including Klaviyo
-    /display:\s*none[^>]*>\s*([^<]{5,})/i,
-    // Visibility hidden
-    /visibility:\s*hidden[^>]*>\s*([^<]{5,})/i,
-    // Font size 0
-    /font-size:\s*0[^>]*>\s*([^<]{5,})/i,
-    // Max height 0
-    /max-height:\s*0[^>]*>\s*([^<]{5,})/i,
-    // Preheader class
-    /class=["'][^"']*preheader[^"']*["'][^>]*>\s*([^<]{5,})/i,
-    // Preview class
-    /class=["'][^"']*preview[^"']*["'][^>]*>\s*([^<]{5,})/i,
+    /display:\s*none[^>]*>\s*([^<]{3,})/i,
+    /visibility:\s*hidden[^>]*>\s*([^<]{3,})/i,
+    /font-size:\s*0[^>]*>\s*([^<]{3,})/i,
+    /max-height:\s*0px[^>]*>\s*([^<]{3,})/i,
+    /class=["'][^"']*preheader[^"']*["'][^>]*>\s*([^<]{3,})/i,
+    /class=["'][^"']*preview[^"']*["'][^>]*>\s*([^<]{3,})/i,
   ]
 
   for (const pattern of patterns) {
     const match = html.match(pattern)
     if (match) {
       const text = match[1]
-        // Strip all invisible/padding unicode characters ESPs add
-        .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180D\u200B-\u200F\u202A-\u202E\u2060-\u2064\u206A-\u206F\u3164\uFEFF\uFFA0]/g, '')
-        // Strip Klaviyo specific spacers
-        .replace(/\u2007/g, '')  // figure space
-        .replace(/\u034F/g, '')  // combining grapheme joiner
-        .replace(/\u00A0/g, '')  // non-breaking space
+        // Strip all invisible unicode padding characters ESPs add
+        .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5]/g, '')
+        .replace(/[\u180B-\u180D\u200B-\u200F\u202A-\u202E]/g, '')
+        .replace(/[\u2060-\u2064\u206A-\u206F\u3164\uFEFF\uFFA0]/g, '')
+        .replace(/\u2007/g, '') // figure space
+        .replace(/\u034F/g, '') // combining grapheme joiner
+        .replace(/\u00A0/g, '') // non-breaking space
+        .replace(/\u200C/g, '') // zero width non-joiner
+        .replace(/\u200B/g, '') // zero width space
         .replace(/&nbsp;/g, '')
         .replace(/&#[0-9]+;/g, '')
         .replace(/&[a-z]+;/g, '')
@@ -59,8 +56,8 @@ export function extractLinks(html: string): string[] {
 }
 
 export function extractLinksFromPlainText(plain: string): string[] {
-  const matches = plain.matchAll(/https?:\/\/[^\s\)]+/g)
-  return [...matches].map(m => m[0]).filter(url => url.startsWith('http'))
+  const matches = [...plain.matchAll(/https?:\/\/[^\s\)>]+/g)]
+  return matches.map(m => m[0]).filter(url => url.startsWith('http'))
 }
 
 export function parseEmail(raw: string) {
@@ -97,7 +94,7 @@ export function parseEmail(raw: string) {
     }
   }
 
-  // Extract preheader from DECODED html
+  // Extract preheader from already-decoded html
   const preheader = extractPreheader(html)
   const links = extractLinks(html)
   const plainLinks = extractLinksFromPlainText(plainText)

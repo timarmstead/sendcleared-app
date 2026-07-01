@@ -74,8 +74,15 @@ export async function POST(req: NextRequest) {
     const html = body['html'] || ''
     const plainText = body['plain'] || ''
 
+    // Parse for preheader and links
     const parsed = parseEmail(html || plainText)
     const preheader = parsed.preheader || ''
+
+    // DEBUG — remove once preheader is working
+    console.log('Preheader extracted:', preheader)
+    console.log('HTML length:', html.length)
+    console.log('HTML start:', html.substring(0, 500))
+
     const links = parsed.links || []
 
     console.log('Storing campaign:', subject)

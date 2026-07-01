@@ -2,7 +2,8 @@ export function decodeQP(str: string): string {
   return str
     .replace(/=\r?\n/g, '')
     .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16)))
+      String.fromCharCode(parseInt(hex, 16))
+    )
 }
 
 export function extractHeader(raw: string, name: string): string {
@@ -11,25 +12,41 @@ export function extractHeader(raw: string, name: string): string {
 }
 
 export function extractPreheader(html: string): string {
+  // html should already be QP-decoded before calling this
   const patterns = [
-    /display:\s*none[^>]*>([^<]{10,})</i,
-    /display:\s*none[^>]*>([\s\S]{10,?}?)<\/div>/i,
-    /visibility:\s*hidden[^>]*>([^<]{10,})</i,
-    /font-size:\s*0[^>]*>([^<]{10,})</i,
-    /class=["'][^"']*preheader[^"']*["'][^>]*>([^<]{10,})</i,
-    /class=["'][^"']*preview[^"']*["'][^>]*>([^<]{10,})</i,
+    // Standard hidden div — most ESPs including Klaviyo
+    /display:\s*none[^>]*>\s*([^<]{5,})/i,
+    // Visibility hidden
+    /visibility:\s*hidden[^>]*>\s*([^<]{5,})/i,
+    // Font size 0
+    /font-size:\s*0[^>]*>\s*([^<]{5,})/i,
+    // Max height 0
+    /max-height:\s*0[^>]*>\s*([^<]{5,})/i,
+    // Preheader class
+    /class=["'][^"']*preheader[^"']*["'][^>]*>\s*([^<]{5,})/i,
+    // Preview class
+    /class=["'][^"']*preview[^"']*["'][^>]*>\s*([^<]{5,})/i,
   ]
 
   for (const pattern of patterns) {
     const match = html.match(pattern)
     if (match) {
       const text = match[1]
-        .replace(/[\u200C\u00A0\u200B\uFEFF\u034F\u2028\u2029]/g, '')
+        // Strip all invisible/padding unicode characters ESPs add
+        .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180D\u200B-\u200F\u202A-\u202E\u2060-\u2064\u206A-\u206F\u3164\uFEFF\uFFA0]/g, '')
+        // Strip Klaviyo specific spacers
+        .replace(/\u2007/g, '')  // figure space
+        .replace(/\u034F/g, '')  // combining grapheme joiner
+        .replace(/\u00A0/g, '')  // non-breaking space
         .replace(/&nbsp;/g, '')
         .replace(/&#[0-9]+;/g, '')
         .replace(/&[a-z]+;/g, '')
+        .replace(/\s+/g, ' ')
         .trim()
-      if (text.length > 5) return text.substring(0, 150)
+
+      if (text.length > 3) {
+        return text.substring(0, 150)
+      }
     }
   }
 
@@ -39,6 +56,11 @@ export function extractPreheader(html: string): string {
 export function extractLinks(html: string): string[] {
   const matches = html.matchAll(/href=["']([^"']+)["']/gi)
   return [...matches].map(m => m[1]).filter(url => url.startsWith('http'))
+}
+
+export function extractLinksFromPlainText(plain: string): string[] {
+  const matches = plain.matchAll(/https?:\/\/[^\s\)]+/g)
+  return [...matches].map(m => m[0]).filter(url => url.startsWith('http'))
 }
 
 export function parseEmail(raw: string) {
@@ -75,8 +97,10 @@ export function parseEmail(raw: string) {
     }
   }
 
+  // Extract preheader from DECODED html
   const preheader = extractPreheader(html)
   const links = extractLinks(html)
+  const plainLinks = extractLinksFromPlainText(plainText)
 
-  return { subject, from, to, html, plainText, preheader, links, raw }
+  return { subject, from, to, html, plainText, preheader, links, plainLinks, raw }
 }

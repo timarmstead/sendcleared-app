@@ -78,10 +78,17 @@ export async function POST(req: NextRequest) {
     const parsed = parseEmail(html || plainText)
     const preheader = parsed.preheader || ''
 
-    // DEBUG — remove once preheader is working
+    // DEBUG
     console.log('Preheader extracted:', preheader)
     console.log('HTML length:', html.length)
     console.log('HTML start:', html.substring(0, 500))
+
+    // Find display:none section
+    const noneIndex = html.indexOf('display:none')
+    console.log('display:none index:', noneIndex)
+    if (noneIndex > -1) {
+      console.log('display:none context:', html.substring(noneIndex - 20, noneIndex + 300))
+    }
 
     const links = parsed.links || []
 

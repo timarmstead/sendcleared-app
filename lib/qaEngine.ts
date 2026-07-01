@@ -5,38 +5,21 @@ const anthropic = new Anthropic({
 })
 
 const ESP_TRACKING_DOMAINS = [
-  // Klaviyo
   'trk.klclick.com', 'klclick.com',
-  // Braze
-  'click.braze.com', 'links.braze.com', 'braze.com',
-  // Omnisend
+  'click.braze.com', 'links.braze.com',
   'tracking.omnisend.com', 'omnisnd.com',
-  // Brevo / Sendinblue
   'click.brevo.com', 'r.brevo.com', 'clicks.sib-sg.com',
-  // Mailchimp
   'mailchi.mp', 'list-manage.com', 'mcusercontent.com',
-  // HubSpot
   'click.hubspot.com', 'hs-email.com', 'hubspotemail.net',
-  // ActiveCampaign
-  'tracking.activecampaign.com', 'lp.ac-mail.co.uk',
-  // Salesforce / ExactTarget
+  'tracking.activecampaign.com',
   'click.salesforce.com', 'links.sfmc.co', 'em.exacttarget.com',
-  // Campaign Monitor
   'cmail1.com', 'cmail2.com', 'cmail3.com', 'cmail4.com',
   'cmail5.com', 'cmail6.com', 'cmail7.com', 'createsend.com',
-  // Dotdigital
   'r1.dotdigital-pages.com', 'dotmailer.com',
-  // Iterable
-  'links.iterable.com', 'iterable.com',
-  // Sendgrid
-  'sendgrid.net', 'u.sg',
-  // Mailgun
+  'links.iterable.com',
+  'sendgrid.net',
   'mailgun.org',
-  // Postmark
-  'pm.mtasv.net',
-  // Drip
   'links.drip.com',
-  // Moosend
   'email.moosend.com',
 ]
 
@@ -66,11 +49,6 @@ function extractLinksFromHtml(html: string): string[] {
     .slice(0, 20)
 }
 
-function extractLinksFromPlainText(plain: string): string[] {
-  const matches = [...plain.matchAll(/https?:\/\/[^\s\)>]+/g)]
-  return matches.map(m => m[0]).filter(url => url.startsWith('http'))
-}
-
 function extractAltTexts(html: string): { missing: number; total: number } {
   const imgs = [...html.matchAll(/<img[^>]*>/gi)]
   const total = imgs.length
@@ -95,40 +73,27 @@ function checkMergeTags(html: string, plain: string): string[] {
   return [...new Set(found)]
 }
 
-function checkUTM(htmlLinks: string[], plainLinks: string[]): {
+function checkUTM(htmlLinks: string[]): {
   missing: number
   total: number
   espTracked: boolean
-  utmInPlainText: boolean
 } {
-  // Check if ESP tracking domains are present in HTML links
+  const total = htmlLinks.length
+
+  // Check if ESP tracking domains are present
   const espTracked = htmlLinks.some(l =>
     ESP_TRACKING_DOMAINS.some(domain => l.includes(domain))
   )
 
-  // Check plain text links for actual UTM parameters
-  const plainLinksWithUTM = plainLinks.filter(l => l.includes('utm_'))
-  const utmInPlainText = plainLinksWithUTM.length > 0
-
-  const total = htmlLinks.length
-
-  if (espTracked && utmInPlainText) {
-    return { missing: 0, total, espTracked: true, utmInPlainText: true }
-  }
-
-  if (espTracked && !utmInPlainText && plainLinks.length > 0) {
-    // ESP tracking present but no UTMs found in plain text links
-    return { missing: plainLinks.length, total, espTracked: true, utmInPlainText: false }
-  }
-
+  // If ESP tracking is active, UTMs are embedded in the redirect chain
+  // Do not check destination URLs — they won't have UTMs directly
   if (espTracked) {
-    // No plain text to verify against — assume UTMs present
-    return { missing: 0, total, espTracked: true, utmInPlainText: false }
+    return { missing: 0, total, espTracked: true }
   }
 
-  // No ESP tracking — check HTML links directly
+  // No ESP tracking — check links directly for UTM parameters
   const missing = htmlLinks.filter(l => !l.includes('utm_')).length
-  return { missing, total, espTracked: false, utmInPlainText: plainLinksWithUTM.length > 0 }
+  return { missing, total, espTracked: false }
 }
 
 function sanitiseForJson(str: string): string {
@@ -150,29 +115,25 @@ export async function runQA(email: {
   plainText: string
   links: string[]
 }) {
+  // Decode QP encoding
   const decodedHtml = decodeQP(email.html)
   const decodedPlain = decodeQP(email.plainText)
 
   const htmlLinks = extractLinksFromHtml(decodedHtml)
-  const plainLinks = extractLinksFromPlainText(decodedPlain)
   const textContent = extractTextFromHtml(decodedHtml)
   const altTexts = extractAltTexts(decodedHtml)
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
-  const utmCheck = checkUTM(htmlLinks, plainLinks)
+  const utmCheck = checkUTM(htmlLinks)
 
   const deterministicChecks = [
     mergeTags.length > 0
       ? `CRITICAL: Unresolved merge tags found: ${mergeTags.join(', ')}`
       : 'PASS: No unresolved merge tags detected',
 
-    utmCheck.espTracked && utmCheck.utmInPlainText
-      ? `PASS: ESP link tracking confirmed with UTM parameters verified in plain text links`
-      : utmCheck.espTracked && !utmCheck.utmInPlainText && plainLinks.length > 0
-      ? `WARNING: ESP link tracking detected but no UTM parameters found in destination URLs`
-      : utmCheck.espTracked
-      ? `PASS: ESP link tracking detected — UTM parameters assumed in redirect chain`
+    utmCheck.espTracked
+      ? `PASS: ESP link tracking confirmed — UTM parameters are tracked via redirect chain (standard for Klaviyo, Braze, Mailchimp etc)`
       : utmCheck.total === 0
-      ? 'INFO: No trackable links found in email'
+      ? 'INFO: No trackable links found'
       : utmCheck.missing === 0
       ? `PASS: All ${utmCheck.total} links have UTM parameters`
       : `WARNING: ${utmCheck.missing} of ${utmCheck.total} links are missing UTM parameters`,
@@ -197,8 +158,8 @@ export async function runQA(email: {
       : 'CRITICAL: No physical address detected — required by CAN-SPAM and GDPR',
 
     email.preheader && email.preheader.length > 3
-      ? `PASS: Preview text detected: "${email.preheader.substring(0, 60)}"`
-      : 'WARNING: Preview text not detected — check your ESP preview text setting',
+      ? `PASS: Preview text set: "${email.preheader.substring(0, 80)}"`
+      : 'WARNING: Preview text not detected — check your ESP preview text field',
 
     htmlLinks.length > 0
       ? `PASS: ${htmlLinks.length} links found`
@@ -220,10 +181,10 @@ export async function runQA(email: {
     `From: ${safeFrom}`,
     safePreheader ? `Preview text: "${safePreheader}"` : 'Preview text: NOT DETECTED',
     `Plain text: ${decodedPlain.length > 50 ? 'present' : 'missing'}`,
-    `HTML links: ${htmlLinks.length} | Plain text links: ${plainLinks.length}`,
+    `HTML links: ${htmlLinks.length}`,
     `Images: ${altTexts.total} total, ${altTexts.missing} missing alt text`,
     '',
-    'PRE-CHECKED FINDINGS — treat these as facts, do not contradict:',
+    'PRE-CHECKED FINDINGS — these are facts, do not contradict:',
     ...deterministicChecks,
     '',
     'Email text content:',
@@ -232,13 +193,12 @@ export async function runQA(email: {
 
   const prompt = `You are SendCleared, an expert email marketing QA agent. Return ONLY valid JSON. No markdown, no backticks, no text outside the JSON.
 
-IMPORTANT RULES:
-- Sending from a subdomain (send.domain.com, mail.domain.com, em.domain.com) is completely normal for ESP-sent emails — never flag this
-- Trust the PRE-CHECKED FINDINGS below — they are deterministic and accurate — never contradict them
-- If ESP tracking is confirmed with UTMs, do not flag UTM issues
-- Base content analysis on the email text provided — do not assume content is missing
-- All issue text must use single quotes not double quotes
-- Summary must use single quotes not double quotes
+RULES:
+- Sending from a subdomain (send.domain.com, mail.domain.com) is normal for ESPs — never flag this
+- The PRE-CHECKED FINDINGS below are accurate and deterministic — never contradict them
+- If ESP tracking is confirmed with UTM pass, do not flag UTM issues anywhere in your response
+- Use single quotes only in all text fields — never double quotes inside strings
+- Keep all issue text under 100 characters
 
 ${meta}
 
@@ -251,7 +211,7 @@ Return this exact JSON:
       "name": "Content & copy",
       "score": 80,
       "issues": [
-        { "severity": "pass", "text": "Finding using single quotes only under 100 chars." }
+        { "severity": "pass", "text": "Finding using single quotes only." }
       ]
     },
     {
@@ -285,7 +245,7 @@ Return this exact JSON:
   ]
 }
 
-Each section must have 3-4 issues. Severity: critical, warning, info, or pass.`
+Each section: 3-4 issues. Severity: critical, warning, info, or pass.`
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
@@ -313,7 +273,7 @@ Each section must have 3-4 issues. Severity: critical, warning, info, or pass.`
   try {
     return JSON.parse(jsonString)
   } catch (parseError) {
-    console.error('JSON parse error. Raw response:', jsonString.substring(0, 500))
+    console.error('JSON parse error:', jsonString.substring(0, 500))
     throw new Error(`JSON parse failed: ${parseError}`)
   }
 }

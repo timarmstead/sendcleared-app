@@ -30,7 +30,7 @@ function extractTextFromHtml(html: string): string {
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .substring(0, 3000)
+    .substring(0, 2000)
 }
 
 function extractLinksFromHtml(html: string): string[] {
@@ -75,6 +75,17 @@ function checkUTM(links: string[]): { missing: number; total: number; espTracked
   return { missing, total, espTracked: false }
 }
 
+function sanitiseForJson(str: string): string {
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, ' ')
+    .replace(/\r/g, ' ')
+    .replace(/\t/g, ' ')
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+    .substring(0, 200)
+}
+
 export async function runQA(email: {
   subject: string
   from: string
@@ -83,18 +94,15 @@ export async function runQA(email: {
   plainText: string
   links: string[]
 }) {
-  // Decode quoted-printable encoding
   const decodedHtml = decodeQP(email.html)
   const decodedPlain = decodeQP(email.plainText)
 
-  // Extract useful data
   const links = extractLinksFromHtml(decodedHtml)
   const textContent = extractTextFromHtml(decodedHtml)
   const altTexts = extractAltTexts(decodedHtml)
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(links)
 
-  // Deterministic checks passed to AI as facts
   const deterministicChecks = [
     mergeTags.length > 0
       ? `CRITICAL: Unresolved merge tags found: ${mergeTags.join(', ')}`
@@ -130,18 +138,29 @@ export async function runQA(email: {
       : 'CRITICAL: No physical address detected — required by CAN-SPAM and GDPR',
 
     email.preheader && email.preheader.length > 5
-      ? `PASS: Preheader/preview text detected: "${email.preheader.substring(0, 60)}"`
-      : 'WARNING: Preheader/preview text not detected in HTML — if set in your ESP it may use a non-standard format. Check your inbox preview shows the correct text before sending.',
+      ? `PASS: Preheader/preview text detected`
+      : 'WARNING: Preheader/preview text not detected in HTML — check your ESP preview text setting',
 
     links.length > 0
       ? `PASS: ${links.length} links found and extracted`
       : 'WARNING: No links detected — check HTML encoding',
   ]
 
+  // Sanitise text content to prevent JSON issues
+  const safeTextContent = textContent
+    .replace(/\\/g, '')
+    .replace(/"/g, "'")
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+    .substring(0, 1500)
+
+  const safeSubject = sanitiseForJson(email.subject)
+  const safeFrom = sanitiseForJson(email.from)
+  const safePreheader = email.preheader ? sanitiseForJson(email.preheader) : ''
+
   const meta = [
-    `Subject line: "${email.subject}" (${email.subject.length} characters)`,
-    `From: ${email.from}`,
-    email.preheader ? `Preheader text: "${email.preheader}"` : 'Preheader: NOT SET',
+    `Subject line: "${safeSubject}" (${email.subject.length} characters)`,
+    `From: ${safeFrom}`,
+    safePreheader ? `Preheader text: "${safePreheader}"` : 'Preheader: NOT SET',
     `Plain text: ${decodedPlain.length > 50 ? 'present' : 'missing or very short'}`,
     `Links found: ${links.length}`,
     `Images: ${altTexts.total} total, ${altTexts.missing} missing alt text`,
@@ -149,47 +168,73 @@ export async function runQA(email: {
     'PRE-CHECKED FINDINGS (use these as facts, do not contradict them):',
     ...deterministicChecks,
     '',
-    'Email body text content (first 3000 chars):',
-    textContent,
+    'Email body text content:',
+    safeTextContent,
   ].join('\n')
 
-  const prompt = `You are SendCleared, an expert email marketing QA agent. Analyse this email and return ONLY valid JSON — no markdown, no backticks, no explanation.
+  const prompt = `You are SendCleared, an expert email marketing QA agent. Return ONLY a valid JSON object. No markdown, no backticks, no text before or after the JSON.
 
-IMPORTANT CONTEXT:
-- This email was sent via Klaviyo or another ESP as a test preview
-- Sending from a subdomain like "send.domain.com" or "mail.domain.com" is completely normal for ESP-sent emails — do NOT flag this as an issue
-- The email HTML may be complex with many images and product blocks — judge content based on the text content provided
-- Trust the pre-checked findings below — they are deterministic and accurate — do not contradict them
-- If ESP link tracking is detected, UTM parameters are embedded in the redirect chain — do not flag as missing
+IMPORTANT:
+- Sending from a subdomain like send.domain.com is normal for ESPs — do NOT flag this
+- Trust the pre-checked findings below — they are accurate — do not contradict them
+- If ESP link tracking is detected, UTM parameters are in the redirect chain — do not flag as missing
+- Base content analysis on the email text provided — do not assume content is missing
 
 ${meta}
 
-Return exactly this JSON:
+Return this exact JSON structure with no deviations:
 {
-  "score": <integer 0-100>,
-  "summary": "<2-3 sentences. Be specific and accurate. Do not assume content is missing.>",
+  "score": 75,
+  "summary": "Two to three sentence summary here.",
   "sections": [
     {
-      "name": "<section name>",
-      "score": <integer 0-100>,
+      "name": "Content & copy",
+      "score": 80,
       "issues": [
-        { "severity": "critical|warning|info|pass", "text": "<finding under 120 chars>" }
+        { "severity": "pass", "text": "Issue text here under 100 chars." }
+      ]
+    },
+    {
+      "name": "Links & tracking",
+      "score": 80,
+      "issues": [
+        { "severity": "pass", "text": "Issue text here under 100 chars." }
+      ]
+    },
+    {
+      "name": "Accessibility",
+      "score": 80,
+      "issues": [
+        { "severity": "pass", "text": "Issue text here under 100 chars." }
+      ]
+    },
+    {
+      "name": "Spam signals",
+      "score": 80,
+      "issues": [
+        { "severity": "pass", "text": "Issue text here under 100 chars." }
+      ]
+    },
+    {
+      "name": "Rendering readiness",
+      "score": 80,
+      "issues": [
+        { "severity": "pass", "text": "Issue text here under 100 chars." }
       ]
     }
   ]
 }
 
-Sections must be exactly: "Content & copy", "Links & tracking", "Accessibility", "Spam signals", "Rendering readiness"
-Each section: 3-4 issues
-Severity: critical=blocks send, warning=hurts performance, info=note, pass=good
-
-For "Links & tracking": base findings on the pre-checked UTM data above
-For "Content & copy": base findings on the actual text content provided — do not say body copy is missing if text content is present
-For subdomain sending: this is normal ESP behaviour — only flag if DKIM/DMARC actually fails`
+Rules:
+- score is an integer 0-100
+- severity must be one of: critical, warning, info, pass
+- each section must have 3-4 issues
+- issue text must be under 100 characters and contain no double quotes — use single quotes if needed
+- summary must contain no double quotes — use single quotes if needed`
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1500,
+    max_tokens: 2000,
     messages: [{ role: 'user', content: prompt }],
   })
 
@@ -198,15 +243,25 @@ For subdomain sending: this is normal ESP behaviour — only flag if DKIM/DMARC 
     .join('')
     .trim()
 
+  // Clean any markdown
   const cleaned = raw
     .replace(/^```json\s*/i, '')
     .replace(/^```\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim()
 
+  // Find the JSON object
   const start = cleaned.indexOf('{')
   const end = cleaned.lastIndexOf('}')
   if (start === -1) throw new Error('No JSON in QA response')
 
-  return JSON.parse(cleaned.substring(start, end + 1))
+  const jsonString = cleaned.substring(start, end + 1)
+
+  try {
+    return JSON.parse(jsonString)
+  } catch (parseError) {
+    // Log the raw response to help debug
+    console.error('JSON parse error. Raw response:', jsonString.substring(0, 500))
+    throw new Error(`JSON parse failed: ${parseError}`)
+  }
 }

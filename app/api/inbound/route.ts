@@ -9,107 +9,107 @@ const supabase = createClient(
 )
 
 async function processEmail(body: Record<string, string>) {
-  // CloudMailin sends flat form keys like 'envelope[to]'
-  const toAddress =
-    body['envelope[to]'] ||
-    body['envelope[recipients][0]'] ||
-    body['headers[to]'] ||
-    ''
+  try {
+    const toAddress =
+      body['envelope[to]'] ||
+      body['envelope[recipients][0]'] ||
+      body['headers[to]'] ||
+      ''
 
-  if (!toAddress) {
-    console.log('No to address found')
-    return
-  }
-
-  // Extract just the email address
-  const toMatch = toAddress.match(/([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/)
-  const inboxAddress = toMatch ? toMatch[1].toLowerCase() : toAddress.toLowerCase()
-
-  console.log('Inbox address:', inboxAddress)
-
-  // Find which client this inbox belongs to
-  const { data: client, error: clientError } = await supabase
-    .from('clients')
-    .select('id, user_id, name')
-    .eq('inbox_address', inboxAddress)
-    .single()
-
-  if (clientError || !client) {
-    console.log('No client found for address:', inboxAddress)
-    return
-  }
-
-  console.log('Client found:', client.name)
-
-  // Check for duplicate using md5
-  const emailMd5 = body['envelope[md5]'] || ''
-
-  if (emailMd5) {
-    const { data: existing } = await supabase
-      .from('campaigns')
-      .select('id')
-      .eq('email_md5', emailMd5)
-      .single()
-
-    if (existing) {
-      console.log('Duplicate email detected, skipping:', emailMd5)
+    if (!toAddress) {
+      console.log('No to address found')
       return
     }
+
+    const toMatch = toAddress.match(/([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/)
+    const inboxAddress = toMatch ? toMatch[1].toLowerCase() : toAddress.toLowerCase()
+    console.log('Inbox address:', inboxAddress)
+
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('id, user_id, name')
+      .eq('inbox_address', inboxAddress)
+      .single()
+
+    if (clientError || !client) {
+      console.log('No client found:', clientError?.message)
+      return
+    }
+
+    console.log('Client found:', client.name)
+
+    // Check for duplicate
+    const emailMd5 = body['envelope[md5]'] || ''
+    if (emailMd5) {
+      const { data: existing } = await supabase
+        .from('campaigns')
+        .select('id')
+        .eq('email_md5', emailMd5)
+        .maybeSingle()
+
+      if (existing) {
+        console.log('Duplicate email, skipping:', emailMd5)
+        return
+      }
+    }
+
+    const subject = body['headers[subject]'] || ''
+    const from = body['envelope[from]'] || body['headers[from]'] || ''
+    const html = body['html'] || ''
+    const plainText = body['plain'] || ''
+
+    const parsed = parseEmail(html || plainText)
+    const preheader = parsed.preheader || ''
+    const links = parsed.links || []
+
+    console.log('Storing campaign:', subject)
+
+    const { data: campaign, error: campaignError } = await supabase
+      .from('campaigns')
+      .insert({
+        client_id: client.id,
+        subject,
+        from_address: from,
+        preheader,
+        html_body: html,
+        plain_text: plainText,
+        raw_email: JSON.stringify(body),
+        email_md5: emailMd5 || null,
+      })
+      .select()
+      .single()
+
+    if (campaignError || !campaign) {
+      console.error('Campaign insert error:', campaignError?.message, campaignError?.details)
+      return
+    }
+
+    console.log('Campaign stored:', campaign.id)
+    console.log('Running QA...')
+
+    const qaResult = await runQA({ subject, from, preheader, html, plainText, links })
+
+    console.log('QA complete, score:', qaResult.score)
+
+    const { error: reportError } = await supabase
+      .from('reports')
+      .insert({
+        campaign_id: campaign.id,
+        score: qaResult.score,
+        summary: qaResult.summary,
+        sections: qaResult.sections,
+      })
+
+    if (reportError) {
+      console.error('Report insert error:', reportError?.message, reportError?.details)
+      return
+    }
+
+    console.log('Report stored successfully for:', client.name)
+
+  } catch (err) {
+    console.error('processEmail error:', err)
   }
-
-  // Extract email parts from flat keys
-  const subject = body['headers[subject]'] || ''
-  const from = body['envelope[from]'] || body['headers[from]'] || ''
-  const html = body['html'] || ''
-  const plainText = body['plain'] || ''
-
-  // Parse for preheader and links
-  const parsed = parseEmail(html || plainText)
-  const preheader = parsed.preheader || ''
-  const links = parsed.links || []
-
-  // Store the campaign
-  const { data: campaign, error: campaignError } = await supabase
-    .from('campaigns')
-    .insert({
-      client_id: client.id,
-      subject,
-      from_address: from,
-      preheader,
-      html_body: html,
-      plain_text: plainText,
-      raw_email: JSON.stringify(body),
-      email_md5: emailMd5 || null,
-    })
-    .select()
-    .single()
-
-  if (campaignError || !campaign) {
-    console.error('Campaign insert error:', campaignError)
-    return
-  }
-
-  console.log('Campaign stored:', campaign.id)
-
-  // Run the QA engine
-  const qaResult = await runQA({ subject, from, preheader, html, plainText, links })
-
-  // Store the QA report
-  const { error: reportError } = await supabase
-    .from('reports')
-    .insert({
-      campaign_id: campaign.id,
-      score: qaResult.score,
-      summary: qaResult.summary,
-      sections: qaResult.sections,
-    })
-
-  if (reportError) {
-    console.error('Report insert error:', reportError)
-    return
-  }
-
-  console.log(`QA complete for ${client.name} — score: ${qaResult.score}`)
 }
 
 export async function POST(req: NextRequest) {
@@ -126,21 +126,17 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    console.log('Inbound body keys:', Object.keys(body))
+    console.log('Webhook received, to:', body['envelope[to]'])
 
-    // Return 200 immediately so CloudMailin doesn't retry
-    // Then process in background using waitUntil if available
-    const response = NextResponse.json({ received: true }, { status: 200 })
-
-    // Process asynchronously — don't await so we return 200 fast
+    // Return 200 immediately then process
     processEmail(body).catch(err => {
-      console.error('Background processing error:', err)
+      console.error('Background error:', err)
     })
 
-    return response
+    return NextResponse.json({ received: true }, { status: 200 })
 
   } catch (err) {
-    console.error('Inbound webhook error:', err)
+    console.error('Webhook handler error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

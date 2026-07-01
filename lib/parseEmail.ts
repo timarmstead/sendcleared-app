@@ -12,29 +12,31 @@ export function extractHeader(raw: string, name: string): string {
 }
 
 export function extractPreheader(html: string): string {
-  // Must be called with DECODED html (after QP decoding)
+  // Match hidden div — text may be on next line, hence [\s\S] and the s flag workaround
   const patterns = [
-    /display:\s*none[^>]*>\s*([^<]{3,})/i,
-    /visibility:\s*hidden[^>]*>\s*([^<]{3,})/i,
-    /font-size:\s*0[^>]*>\s*([^<]{3,})/i,
-    /max-height:\s*0px[^>]*>\s*([^<]{3,})/i,
-    /class=["'][^"']*preheader[^"']*["'][^>]*>\s*([^<]{3,})/i,
-    /class=["'][^"']*preview[^"']*["'][^>]*>\s*([^<]{3,})/i,
+    /display:\s*none[^>]*>\s*([\s\S]{3,?}?)<\/div>/i,
+    /visibility:\s*hidden[^>]*>\s*([\s\S]{3,?}?)<\/div>/i,
+    /max-height:\s*0px[^>]*>\s*([\s\S]{3,?}?)<\/div>/i,
+    /class=["'][^"']*preheader[^"']*["'][^>]*>\s*([\s\S]{3,?}?)<\/div>/i,
+    /class=["'][^"']*preview[^"']*["'][^>]*>\s*([\s\S]{3,?}?)<\/div>/i,
   ]
 
   for (const pattern of patterns) {
     const match = html.match(pattern)
     if (match) {
       const text = match[1]
-        // Strip all invisible unicode padding characters ESPs add
+        // Strip invisible unicode padding characters ESPs add
         .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5]/g, '')
         .replace(/[\u180B-\u180D\u200B-\u200F\u202A-\u202E]/g, '')
         .replace(/[\u2060-\u2064\u206A-\u206F\u3164\uFEFF\uFFA0]/g, '')
-        .replace(/\u2007/g, '') // figure space
-        .replace(/\u034F/g, '') // combining grapheme joiner
-        .replace(/\u00A0/g, '') // non-breaking space
-        .replace(/\u200C/g, '') // zero width non-joiner
-        .replace(/\u200B/g, '') // zero width space
+        .replace(/\u2007/g, '')
+        .replace(/\u034F/g, '')
+        .replace(/\u00A0/g, '')
+        .replace(/\u200C/g, '')
+        .replace(/\u200B/g, '')
+        // Strip the ͏ character Klaviyo uses as spacer (U+034F)
+        .replace(/͏/g, '')
+        .replace(/\xad/g, '')
         .replace(/&nbsp;/g, '')
         .replace(/&#[0-9]+;/g, '')
         .replace(/&[a-z]+;/g, '')
@@ -94,7 +96,7 @@ export function parseEmail(raw: string) {
     }
   }
 
-  // Extract preheader from already-decoded html
+  // Extract preheader from decoded html
   const preheader = extractPreheader(html)
   const links = extractLinks(html)
   const plainLinks = extractLinksFromPlainText(plainText)

@@ -4,6 +4,17 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 })
 
+const ESP_TRACKING_DOMAINS = [
+  'trk.klclick.com',
+  'click.emaildomain.com',
+  'links.sfmc.co',
+  'mailchi.mp',
+  'click.convertkit-mail',
+  'em.brevo.com',
+  'click.hubspot.com',
+  'tracking.activecampaign.com',
+]
+
 function decodeQP(str: string): string {
   return str
     .replace(/=\r?\n/g, '')
@@ -33,7 +44,9 @@ function extractLinksFromHtml(html: string): string[] {
 function extractAltTexts(html: string): { missing: number; total: number } {
   const imgs = [...html.matchAll(/<img[^>]*>/gi)]
   const total = imgs.length
-  const missing = imgs.filter(m => !m[0].includes('alt=') || m[0].match(/alt=["']\s*["']/)).length
+  const missing = imgs.filter(m =>
+    !m[0].includes('alt=') || m[0].match(/alt=["']\s*["']/)
+  ).length
   return { missing, total }
 }
 
@@ -52,10 +65,14 @@ function checkMergeTags(html: string, plain: string): string[] {
   return [...new Set(found)]
 }
 
-function checkUTM(links: string[]): { missing: number; total: number } {
+function checkUTM(links: string[]): { missing: number; total: number; espTracked: boolean } {
   const total = links.length
+  const espTracked = links.some(l =>
+    ESP_TRACKING_DOMAINS.some(domain => l.includes(domain))
+  )
+  if (espTracked) return { missing: 0, total, espTracked: true }
   const missing = links.filter(l => !l.includes('utm_')).length
-  return { missing, total }
+  return { missing, total, espTracked: false }
 }
 
 export async function runQA(email: {
@@ -77,33 +94,45 @@ export async function runQA(email: {
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(links)
 
-  // Build deterministic checks to pass to AI
+  // Deterministic checks passed to AI as facts
   const deterministicChecks = [
     mergeTags.length > 0
       ? `CRITICAL: Unresolved merge tags found: ${mergeTags.join(', ')}`
       : 'PASS: No unresolved merge tags detected',
-    utmCheck.total === 0
+
+    utmCheck.espTracked
+      ? `PASS: ESP link tracking detected (Klaviyo/similar) — UTM parameters are embedded in tracked redirects`
+      : utmCheck.total === 0
       ? 'INFO: No trackable links found in email'
       : utmCheck.missing === utmCheck.total
       ? `WARNING: None of the ${utmCheck.total} links have UTM parameters`
       : utmCheck.missing > 0
       ? `WARNING: ${utmCheck.missing} of ${utmCheck.total} links are missing UTM parameters`
       : `PASS: All ${utmCheck.total} links have UTM parameters`,
+
     altTexts.total === 0
       ? 'INFO: No images found in email'
       : altTexts.missing > 0
       ? `WARNING: ${altTexts.missing} of ${altTexts.total} images are missing alt text`
       : `PASS: All ${altTexts.total} images have alt text`,
+
     decodedPlain.length > 50
       ? 'PASS: Plain text version present'
       : 'WARNING: Plain text version is missing or very short',
+
     decodedHtml.toLowerCase().includes('unsubscribe')
       ? 'PASS: Unsubscribe link found'
       : 'CRITICAL: No unsubscribe link detected',
+
     /\d{1,4}\s+\w+.*?[A-Z]{1,2}\d/.test(decodedHtml + decodedPlain) ||
     /[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/.test(decodedHtml + decodedPlain)
       ? 'PASS: Physical address found in email'
       : 'CRITICAL: No physical address detected — required by CAN-SPAM and GDPR',
+
+    email.preheader && email.preheader.length > 5
+      ? `PASS: Preheader/preview text detected: "${email.preheader.substring(0, 60)}"`
+      : 'WARNING: Preheader/preview text not detected in HTML — if set in your ESP it may use a non-standard format. Check your inbox preview shows the correct text before sending.',
+
     links.length > 0
       ? `PASS: ${links.length} links found and extracted`
       : 'WARNING: No links detected — check HTML encoding',
@@ -120,7 +149,7 @@ export async function runQA(email: {
     'PRE-CHECKED FINDINGS (use these as facts, do not contradict them):',
     ...deterministicChecks,
     '',
-    'Email body text content (first 2000 chars):',
+    'Email body text content (first 3000 chars):',
     textContent,
   ].join('\n')
 
@@ -129,8 +158,9 @@ export async function runQA(email: {
 IMPORTANT CONTEXT:
 - This email was sent via Klaviyo or another ESP as a test preview
 - Sending from a subdomain like "send.domain.com" or "mail.domain.com" is completely normal for ESP-sent emails — do NOT flag this as an issue
-- The email HTML may be complex with many images and product blocks — judge content based on the text content provided, not assumptions about missing content
-- Trust the pre-checked findings below — they are deterministic and accurate
+- The email HTML may be complex with many images and product blocks — judge content based on the text content provided
+- Trust the pre-checked findings below — they are deterministic and accurate — do not contradict them
+- If ESP link tracking is detected, UTM parameters are embedded in the redirect chain — do not flag as missing
 
 ${meta}
 
@@ -153,9 +183,9 @@ Sections must be exactly: "Content & copy", "Links & tracking", "Accessibility",
 Each section: 3-4 issues
 Severity: critical=blocks send, warning=hurts performance, info=note, pass=good
 
-For "Links & tracking": base your findings on the pre-checked UTM data above — do not say links are missing if links were found
+For "Links & tracking": base findings on the pre-checked UTM data above
 For "Content & copy": base findings on the actual text content provided — do not say body copy is missing if text content is present
-For subdomain sending: this is normal ESP behaviour — only flag if DKIM/DMARC alignment actually fails`
+For subdomain sending: this is normal ESP behaviour — only flag if DKIM/DMARC actually fails`
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',

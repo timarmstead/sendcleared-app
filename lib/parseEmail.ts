@@ -2,8 +2,7 @@ export function decodeQP(str: string): string {
   return str
     .replace(/=\r?\n/g, '')
     .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16))
-    )
+      String.fromCharCode(parseInt(hex, 16)))
 }
 
 export function extractHeader(raw: string, name: string): string {
@@ -12,12 +11,29 @@ export function extractHeader(raw: string, name: string): string {
 }
 
 export function extractPreheader(html: string): string {
-  const match = html.match(
-    /display:\s*none[^>]*>([^<]{10,})</i
-  )
-  return match
-    ? match[1].replace(/[\u200C\u00A0\u200B\uFEFF]/g, '').trim().substring(0, 90)
-    : ''
+  const patterns = [
+    /display:\s*none[^>]*>([^<]{10,})</i,
+    /display:\s*none[^>]*>([\s\S]{10,?}?)<\/div>/i,
+    /visibility:\s*hidden[^>]*>([^<]{10,})</i,
+    /font-size:\s*0[^>]*>([^<]{10,})</i,
+    /class=["'][^"']*preheader[^"']*["'][^>]*>([^<]{10,})</i,
+    /class=["'][^"']*preview[^"']*["'][^>]*>([^<]{10,})</i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern)
+    if (match) {
+      const text = match[1]
+        .replace(/[\u200C\u00A0\u200B\uFEFF\u034F\u2028\u2029]/g, '')
+        .replace(/&nbsp;/g, '')
+        .replace(/&#[0-9]+;/g, '')
+        .replace(/&[a-z]+;/g, '')
+        .trim()
+      if (text.length > 5) return text.substring(0, 150)
+    }
+  }
+
+  return ''
 }
 
 export function extractLinks(html: string): string[] {
@@ -32,7 +48,6 @@ export function parseEmail(raw: string) {
   const from = extractHeader(raw, 'From')
   const to = extractHeader(raw, 'To')
 
-  // Extract HTML from MIME
   const boundaryMatch = raw.match(/boundary=["']?([^"'\r\n;]+)["']?/i)
   let html = ''
   let plainText = ''

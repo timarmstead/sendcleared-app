@@ -71,16 +71,22 @@ export async function POST(req: NextRequest) {
     const html = body['html'] || ''
     const plainText = body['plain'] || ''
 
-    // Targeted preheader debug
-    const noneIdx = html.indexOf('display:none')
-    if (noneIdx > -1) {
-      const tagCloseIdx = html.indexOf('>', noneIdx)
-      const divCloseIdx = html.indexOf('</div>', tagCloseIdx)
-      const rawExtract = html.substring(tagCloseIdx + 1, divCloseIdx)
-      console.log('Raw preheader extract:', JSON.stringify(rawExtract.substring(0, 100)))
-      console.log('Extract length:', rawExtract.length)
-    } else {
-      console.log('No display:none found in HTML')
+    // Debug extractPreheader directly
+    const testNoneIdx = html.indexOf('display:none')
+    if (testNoneIdx > -1) {
+      const testTagClose = html.indexOf('>', testNoneIdx)
+      const testDivClose = html.indexOf('</div>', testTagClose)
+      let testText = html.substring(testTagClose + 1, testDivClose)
+      testText = testText.replace(/\r\n/g, ' ').replace(/\r/g, ' ').replace(/\n/g, ' ')
+      const filtered = testText.split('').filter(char => {
+        const code = char.charCodeAt(0)
+        if (code <= 0x001F) return false
+        if (code === 0x034F) return false
+        if (code >= 0x200B && code <= 0x200F) return false
+        return true
+      }).join('').replace(/\s+/g, ' ').trim()
+      console.log('Direct filter result:', JSON.stringify(filtered.substring(0, 100)))
+      console.log('Direct filter length:', filtered.length)
     }
 
     const parsed = parseEmail(html || plainText)
@@ -88,7 +94,6 @@ export async function POST(req: NextRequest) {
     console.log('Preheader result:', preheader)
 
     const links = parsed.links || []
-
     console.log('Storing campaign:', subject)
 
     const { data: campaign, error: campaignError } = await supabase

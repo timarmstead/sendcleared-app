@@ -432,18 +432,29 @@ export default function ApprovalPage() {
             Review and approve this email
           </p>
 
+          <label style={{
+            display: 'block',
+            fontSize: '11px',
+            fontWeight: 600,
+            color: 'rgba(255,255,255,0.75)',
+            marginBottom: '5px',
+          }}>
+            Your name
+          </label>
           <input
             type="text"
             value={name}
             onChange={e => setName(e.target.value)}
-            placeholder="Your name"
+            placeholder="e.g. Sarah Johnson"
             style={{
               width: '100%',
-              padding: '9px 12px',
+              padding: '10px 12px',
               fontSize: '13px',
               borderRadius: '8px',
-              border: 'none',
-              marginBottom: '10px',
+              border: '1px solid rgba(255,255,255,0.4)',
+              background: '#fff',
+              color: '#0f1117',
+              marginBottom: '12px',
             }}
           />
 
@@ -474,13 +485,13 @@ export default function ApprovalPage() {
                 onClick={() => setShowChangesForm(true)}
                 disabled={!name.trim() || submitting}
                 style={{
-                  background: 'rgba(255,255,255,0.12)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.3)',
+                  background: '#fff',
+                  color: '#134e8e',
+                  border: 'none',
                   padding: '10px 20px',
                   borderRadius: '8px',
                   fontSize: '13px',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   cursor: (!name.trim() || submitting) ? 'default' : 'pointer',
                   opacity: (!name.trim() || submitting) ? 0.5 : 1,
                   flex: 1,
@@ -500,9 +511,11 @@ export default function ApprovalPage() {
                   height: '90px',
                   fontSize: '13px',
                   fontFamily: 'inherit',
-                  padding: '8px 10px',
+                  padding: '10px 12px',
                   borderRadius: '8px',
-                  border: 'none',
+                  border: '1px solid rgba(255,255,255,0.4)',
+                  background: '#fff',
+                  color: '#0f1117',
                   resize: 'vertical',
                   marginBottom: '8px',
                 }}
@@ -528,13 +541,13 @@ export default function ApprovalPage() {
                 <button
                   onClick={() => setShowChangesForm(false)}
                   style={{
-                    background: 'rgba(255,255,255,0.12)',
-                    color: '#fff',
-                    border: '1px solid rgba(255,255,255,0.3)',
+                    background: '#fff',
+                    color: '#134e8e',
+                    border: 'none',
                     padding: '10px 20px',
                     borderRadius: '8px',
                     fontSize: '13px',
-                    fontWeight: 600,
+                    fontWeight: 700,
                     cursor: 'pointer',
                     flex: 1,
                   }}

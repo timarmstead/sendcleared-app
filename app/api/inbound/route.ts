@@ -71,27 +71,38 @@ export async function POST(req: NextRequest) {
     const html = body['html'] || ''
     const plainText = body['plain'] || ''
 
-    // Debug extractPreheader directly
-    const testNoneIdx = html.indexOf('display:none')
-    if (testNoneIdx > -1) {
-      const testTagClose = html.indexOf('>', testNoneIdx)
-      const testDivClose = html.indexOf('</div>', testTagClose)
-      let testText = html.substring(testTagClose + 1, testDivClose)
-      testText = testText.replace(/\r\n/g, ' ').replace(/\r/g, ' ').replace(/\n/g, ' ')
-      const filtered = testText.split('').filter(char => {
-        const code = char.charCodeAt(0)
-        if (code <= 0x001F) return false
-        if (code === 0x034F) return false
-        if (code >= 0x200B && code <= 0x200F) return false
-        return true
-      }).join('').replace(/\s+/g, ' ').trim()
-      console.log('Direct filter result:', JSON.stringify(filtered.substring(0, 100)))
-      console.log('Direct filter length:', filtered.length)
+    const parsed = parseEmail(html || plainText)
+
+    // Extract preheader directly in route for reliability
+    let preheader = parsed.preheader || ''
+    if (!preheader && html) {
+      const noneIdx = html.indexOf('display:none')
+      if (noneIdx > -1) {
+        const tagClose = html.indexOf('>', noneIdx)
+        const divClose = html.indexOf('</div>', tagClose)
+        if (tagClose > -1 && divClose > -1) {
+          let raw = html.substring(tagClose + 1, divClose)
+          raw = raw.replace(/\r\n/g, ' ').replace(/\r/g, ' ').replace(/\n/g, ' ')
+          const filtered = raw.split('').filter(char => {
+            const code = char.charCodeAt(0)
+            if (code <= 0x001F) return false
+            if (code === 0x00AD) return false
+            if (code === 0x034F) return false
+            if (code >= 0x200B && code <= 0x200F) return false
+            if (code >= 0x202A && code <= 0x202E) return false
+            if (code >= 0x2060 && code <= 0x2064) return false
+            if (code === 0x2007) return false
+            if (code === 0xFEFF) return false
+            return true
+          }).join('').replace(/&nbsp;/g, '').replace(/\s+/g, ' ').trim()
+          if (filtered.length > 3) {
+            preheader = filtered.substring(0, 150)
+          }
+        }
+      }
     }
 
-    const parsed = parseEmail(html || plainText)
-    const preheader = parsed.preheader || ''
-    console.log('Preheader result:', preheader)
+    console.log('Final preheader:', preheader)
 
     const links = parsed.links || []
     console.log('Storing campaign:', subject)

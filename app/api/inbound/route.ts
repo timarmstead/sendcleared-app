@@ -39,7 +39,6 @@ export async function POST(req: NextRequest) {
     const inboxAddress = toMatch ? toMatch[1].toLowerCase() : toAddress.toLowerCase()
     console.log('Inbox address:', inboxAddress)
 
-    // Find client
     const { data: client, error: clientError } = await supabase
       .from('clients')
       .select('id, user_id, name')
@@ -53,7 +52,6 @@ export async function POST(req: NextRequest) {
 
     console.log('Client found:', client.name)
 
-    // Check for duplicate
     const emailMd5 = body['envelope[md5]'] || ''
     if (emailMd5) {
       const { data: existing } = await supabase
@@ -68,33 +66,31 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Extract email parts
     const subject = body['headers[subject]'] || ''
     const from = body['envelope[from]'] || body['headers[from]'] || ''
     const html = body['html'] || ''
     const plainText = body['plain'] || ''
 
-    // Parse for preheader and links
+    // Targeted preheader debug
+    const noneIdx = html.indexOf('display:none')
+    if (noneIdx > -1) {
+      const tagCloseIdx = html.indexOf('>', noneIdx)
+      const divCloseIdx = html.indexOf('</div>', tagCloseIdx)
+      const rawExtract = html.substring(tagCloseIdx + 1, divCloseIdx)
+      console.log('Raw preheader extract:', JSON.stringify(rawExtract.substring(0, 100)))
+      console.log('Extract length:', rawExtract.length)
+    } else {
+      console.log('No display:none found in HTML')
+    }
+
     const parsed = parseEmail(html || plainText)
     const preheader = parsed.preheader || ''
-
-    // DEBUG
-    console.log('Preheader extracted:', preheader)
-    console.log('HTML length:', html.length)
-    console.log('HTML start:', html.substring(0, 500))
-
-    // Find display:none section
-    const noneIndex = html.indexOf('display:none')
-    console.log('display:none index:', noneIndex)
-    if (noneIndex > -1) {
-      console.log('display:none context:', html.substring(noneIndex - 20, noneIndex + 300))
-    }
+    console.log('Preheader result:', preheader)
 
     const links = parsed.links || []
 
     console.log('Storing campaign:', subject)
 
-    // Store campaign
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
       .insert({
@@ -118,11 +114,9 @@ export async function POST(req: NextRequest) {
     console.log('Campaign stored:', campaign.id)
     console.log('Running QA...')
 
-    // Run QA
     const qaResult = await runQA({ subject, from, preheader, html, plainText, links })
     console.log('QA complete, score:', qaResult.score)
 
-    // Store report
     const { error: reportError } = await supabase
       .from('reports')
       .insert({

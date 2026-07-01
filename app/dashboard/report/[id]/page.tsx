@@ -30,6 +30,10 @@ export default function ReportPage() {
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
+  const [approvalLink, setApprovalLink] = useState<string | null>(null)
+  const [generatingLink, setGeneratingLink] = useState(false)
+  const [linkError, setLinkError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const router = useRouter()
   const params = useParams()
   const campaignId = params.id as string
@@ -62,6 +66,32 @@ export default function ReportPage() {
     if (reportData) setReport(reportData)
 
     setLoading(false)
+  }
+
+  async function generateApprovalLink() {
+    setGeneratingLink(true)
+    setLinkError(null)
+    try {
+      const res = await fetch('/api/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: campaignId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to generate link')
+      setApprovalLink(`${window.location.origin}/r/${data.token}`)
+    } catch (err: any) {
+      setLinkError(err.message)
+    } finally {
+      setGeneratingLink(false)
+    }
+  }
+
+  function copyLink() {
+    if (!approvalLink) return
+    navigator.clipboard.writeText(approvalLink)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   function getBadgeStyle(severity: string) {
@@ -289,36 +319,87 @@ export default function ReportPage() {
               borderRadius: '12px',
               padding: '1.25rem',
               marginTop: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
-              flexWrap: 'wrap',
             }}>
-              <div>
-                <p style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '3px' }}>
-                  Ready to send for client approval?
-                </p>
-                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>
-                  Generates a passwordless magic link — client approves in one click
-                </p>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                flexWrap: 'wrap',
+              }}>
+                <div>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '3px' }}>
+                    Ready to send for client approval?
+                  </p>
+                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>
+                    Generates a passwordless magic link — client approves in one click
+                  </p>
+                </div>
+                {!approvalLink && (
+                  <button
+                    onClick={generateApprovalLink}
+                    disabled={generatingLink}
+                    style={{
+                      background: generatingLink ? '#8fd9ab' : '#4ade80',
+                      color: '#0f1117',
+                      border: 'none',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: generatingLink ? 'default' : 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {generatingLink ? 'Generating…' : 'Generate approval link →'}
+                  </button>
+                )}
               </div>
-              <button
-                onClick={() => alert('Approval link generation coming soon!')}
-                style={{
-                  background: '#4ade80',
-                  color: '#0f1117',
-                  border: 'none',
-                  padding: '10px 20px',
+
+              {linkError && (
+                <p style={{ color: '#ffb4b4', fontSize: '12px', marginTop: '10px' }}>
+                  {linkError}
+                </p>
+              )}
+
+              {approvalLink && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginTop: '12px',
+                  background: 'rgba(255,255,255,0.08)',
                   borderRadius: '8px',
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Generate approval link →
-              </button>
+                  padding: '8px 8px 8px 14px',
+                }}>
+                  <span style={{
+                    color: '#fff',
+                    fontSize: '12px',
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {approvalLink}
+                  </span>
+                  <button
+                    onClick={copyLink}
+                    style={{
+                      background: copied ? '#4ade80' : 'rgba(255,255,255,0.15)',
+                      color: copied ? '#0f1117' : '#fff',
+                      border: 'none',
+                      padding: '7px 14px',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {copied ? '✓ Copied' : 'Copy'}
+                  </button>
+                </div>
+              )}
             </div>
           </>
         )}

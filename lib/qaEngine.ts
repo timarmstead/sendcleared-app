@@ -4,14 +4,58 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 })
 
-function stripHtml(html: string): string {
+function decodeQP(str: string): string {
+  return str
+    .replace(/=\r?\n/g, '')
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16))
+    )
+}
+
+function extractTextFromHtml(html: string): string {
   return html
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .substring(0, 2000)
+    .substring(0, 3000)
+}
+
+function extractLinksFromHtml(html: string): string[] {
+  const matches = [...html.matchAll(/href=["']([^"']+)["']/gi)]
+  return matches
+    .map(m => m[1])
+    .filter(url => url.startsWith('http'))
+    .slice(0, 20)
+}
+
+function extractAltTexts(html: string): { missing: number; total: number } {
+  const imgs = [...html.matchAll(/<img[^>]*>/gi)]
+  const total = imgs.length
+  const missing = imgs.filter(m => !m[0].includes('alt=') || m[0].match(/alt=["']\s*["']/)).length
+  return { missing, total }
+}
+
+function checkMergeTags(html: string, plain: string): string[] {
+  const combined = html + plain
+  const patterns = [
+    /\$\{[^}]+\}/g,
+    /\{\{[^}]+\}\}/g,
+    /%7B%7B[^%]+%7D%7D/g,
+  ]
+  const found: string[] = []
+  patterns.forEach(p => {
+    const matches = combined.match(p)
+    if (matches) found.push(...matches.slice(0, 3))
+  })
+  return [...new Set(found)]
+}
+
+function checkUTM(links: string[]): { missing: number; total: number } {
+  const total = links.length
+  const missing = links.filter(l => !l.includes('utm_')).length
+  return { missing, total }
 }
 
 export async function runQA(email: {
@@ -22,62 +66,96 @@ export async function runQA(email: {
   plainText: string
   links: string[]
 }) {
-  // Truncate HTML safely to avoid JSON parse errors
-  const htmlSample = email.html.substring(0, 4000)
-  const textSample = stripHtml(email.html).substring(0, 1000)
+  // Decode quoted-printable encoding
+  const decodedHtml = decodeQP(email.html)
+  const decodedPlain = decodeQP(email.plainText)
+
+  // Extract useful data
+  const links = extractLinksFromHtml(decodedHtml)
+  const textContent = extractTextFromHtml(decodedHtml)
+  const altTexts = extractAltTexts(decodedHtml)
+  const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
+  const utmCheck = checkUTM(links)
+
+  // Build deterministic checks to pass to AI
+  const deterministicChecks = [
+    mergeTags.length > 0
+      ? `CRITICAL: Unresolved merge tags found: ${mergeTags.join(', ')}`
+      : 'PASS: No unresolved merge tags detected',
+    utmCheck.total === 0
+      ? 'INFO: No trackable links found in email'
+      : utmCheck.missing === utmCheck.total
+      ? `WARNING: None of the ${utmCheck.total} links have UTM parameters`
+      : utmCheck.missing > 0
+      ? `WARNING: ${utmCheck.missing} of ${utmCheck.total} links are missing UTM parameters`
+      : `PASS: All ${utmCheck.total} links have UTM parameters`,
+    altTexts.total === 0
+      ? 'INFO: No images found in email'
+      : altTexts.missing > 0
+      ? `WARNING: ${altTexts.missing} of ${altTexts.total} images are missing alt text`
+      : `PASS: All ${altTexts.total} images have alt text`,
+    decodedPlain.length > 50
+      ? 'PASS: Plain text version present'
+      : 'WARNING: Plain text version is missing or very short',
+    decodedHtml.toLowerCase().includes('unsubscribe')
+      ? 'PASS: Unsubscribe link found'
+      : 'CRITICAL: No unsubscribe link detected',
+    /\d{1,4}\s+\w+.*?[A-Z]{1,2}\d/.test(decodedHtml + decodedPlain) ||
+    /[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/.test(decodedHtml + decodedPlain)
+      ? 'PASS: Physical address found in email'
+      : 'CRITICAL: No physical address detected — required by CAN-SPAM and GDPR',
+    links.length > 0
+      ? `PASS: ${links.length} links found and extracted`
+      : 'WARNING: No links detected — check HTML encoding',
+  ]
 
   const meta = [
-    email.subject ? `Subject line: "${email.subject}"` : '',
-    email.from ? `From: ${email.from}` : '',
-    email.preheader ? `Preheader: "${email.preheader}"` : 'Preheader: NOT SET',
-    email.plainText ? 'Plain text version: present' : 'Plain text version: MISSING',
-    email.links.length
-      ? `Links found (${email.links.length}): ${email.links.slice(0, 8).join(', ')}`
-      : 'No links found',
-    textSample ? `Email text content: ${textSample}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
+    `Subject line: "${email.subject}" (${email.subject.length} characters)`,
+    `From: ${email.from}`,
+    email.preheader ? `Preheader text: "${email.preheader}"` : 'Preheader: NOT SET',
+    `Plain text: ${decodedPlain.length > 50 ? 'present' : 'missing or very short'}`,
+    `Links found: ${links.length}`,
+    `Images: ${altTexts.total} total, ${altTexts.missing} missing alt text`,
+    '',
+    'PRE-CHECKED FINDINGS (use these as facts, do not contradict them):',
+    ...deterministicChecks,
+    '',
+    'Email body text content (first 2000 chars):',
+    textContent,
+  ].join('\n')
 
-  const prompt = `You are SendCleared, an expert email marketing QA agent. Analyse this email and return ONLY a valid JSON object. No markdown, no backticks, no explanation — raw JSON only.
+  const prompt = `You are SendCleared, an expert email marketing QA agent. Analyse this email and return ONLY valid JSON — no markdown, no backticks, no explanation.
+
+IMPORTANT CONTEXT:
+- This email was sent via Klaviyo or another ESP as a test preview
+- Sending from a subdomain like "send.domain.com" or "mail.domain.com" is completely normal for ESP-sent emails — do NOT flag this as an issue
+- The email HTML may be complex with many images and product blocks — judge content based on the text content provided, not assumptions about missing content
+- Trust the pre-checked findings below — they are deterministic and accurate
 
 ${meta}
 
-Return exactly this JSON structure:
+Return exactly this JSON:
 {
-  "score": 75,
-  "summary": "Two sentence summary here.",
+  "score": <integer 0-100>,
+  "summary": "<2-3 sentences. Be specific and accurate. Do not assume content is missing.>",
   "sections": [
     {
-      "name": "Content & copy",
-      "score": 80,
+      "name": "<section name>",
+      "score": <integer 0-100>,
       "issues": [
-        { "severity": "pass", "text": "Finding here." }
+        { "severity": "critical|warning|info|pass", "text": "<finding under 120 chars>" }
       ]
     }
   ]
 }
 
-Rules:
-- score is an integer 0-100
-- sections must be exactly these 5 names: "Content & copy", "Links & tracking", "Accessibility", "Spam signals", "Rendering readiness"
-- each section has 3-4 issues
-- severity is one of: critical, warning, info, pass
-- all strings must be properly escaped JSON — no unescaped quotes or special characters
-- be specific but keep each issue text under 120 characters
+Sections must be exactly: "Content & copy", "Links & tracking", "Accessibility", "Spam signals", "Rendering readiness"
+Each section: 3-4 issues
+Severity: critical=blocks send, warning=hurts performance, info=note, pass=good
 
-Check for:
-- Unresolved merge tags like \${...} or {{...}} — critical
-- Missing UTM parameters on links — warning  
-- Empty alt text on images — warning
-- Subject line length and spam words
-- Unsubscribe link present — critical if missing
-- Physical address in footer — critical if missing
-- Plain text version missing — warning
-- CTA clarity
-
-HTML sample:
-${htmlSample}`
+For "Links & tracking": base your findings on the pre-checked UTM data above — do not say links are missing if links were found
+For "Content & copy": base findings on the actual text content provided — do not say body copy is missing if text content is present
+For subdomain sending: this is normal ESP behaviour — only flag if DKIM/DMARC alignment actually fails`
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
@@ -90,7 +168,6 @@ ${htmlSample}`
     .join('')
     .trim()
 
-  // Clean any markdown formatting just in case
   const cleaned = raw
     .replace(/^```json\s*/i, '')
     .replace(/^```\s*/i, '')

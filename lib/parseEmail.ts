@@ -12,36 +12,48 @@ export function extractHeader(raw: string, name: string): string {
 }
 
 export function extractPreheader(html: string): string {
-  // Use index-based extraction — more reliable than regex for multiline content
   const markers = ['display:none', 'display: none']
 
   for (const marker of markers) {
     const markerIndex = html.indexOf(marker)
     if (markerIndex === -1) continue
 
-    // Find the closing > of the opening tag
     const tagClose = html.indexOf('>', markerIndex)
     if (tagClose === -1) continue
 
-    // Find the closing </div>
     const divClose = html.indexOf('</div>', tagClose)
     if (divClose === -1) continue
 
-    // Extract everything between > and </div>
-    const raw = html.substring(tagClose + 1, divClose)
+    let text = html.substring(tagClose + 1, divClose)
 
-    const text = raw
-      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
-      .replace(/[\u00AD]/g, '')
-      .replace(/[\u034F]/g, '')
-      .replace(/[\u200B-\u200F]/g, '')
-      .replace(/[\u202A-\u202E]/g, '')
-      .replace(/[\u2060-\u2064]/g, '')
-      .replace(/[\u206A-\u206F]/g, '')
-      .replace(/[\u2007]/g, '')
-      .replace(/[\uFEFF]/g, '')
-      .replace(/͏/g, '')
-      .replace(/\xad/g, '')
+    // Remove \r\n and leading/trailing whitespace first
+    text = text.replace(/\r\n/g, ' ').replace(/\r/g, ' ').replace(/\n/g, ' ')
+
+    // Remove the ͏ character (U+034F combining grapheme joiner) and all variants
+    // Use charCodeAt-based replacement to be absolutely sure
+    text = text.split('').filter(char => {
+      const code = char.charCodeAt(0)
+      // Keep only printable ASCII and common safe unicode
+      // Remove invisible/zero-width/control characters
+      if (code <= 0x001F) return false  // control chars
+      if (code === 0x007F) return false  // DEL
+      if (code >= 0x0080 && code <= 0x009F) return false  // C1 controls
+      if (code === 0x00AD) return false  // soft hyphen
+      if (code === 0x034F) return false  // combining grapheme joiner ͏
+      if (code === 0x061C) return false  // arabic letter mark
+      if (code >= 0x200B && code <= 0x200F) return false  // zero width spaces
+      if (code >= 0x202A && code <= 0x202E) return false  // directional formatting
+      if (code >= 0x2060 && code <= 0x2064) return false  // word joiner etc
+      if (code >= 0x206A && code <= 0x206F) return false  // deprecated formatting
+      if (code === 0x2007) return false  // figure space
+      if (code === 0xFEFF) return false  // BOM
+      if (code === 0xFFA0) return false  // halfwidth hangul filler
+      if (code === 0x3164) return false  // hangul filler
+      return true
+    }).join('')
+
+    // Clean up HTML entities and extra whitespace
+    text = text
       .replace(/&nbsp;/g, '')
       .replace(/&#[0-9]+;/g, '')
       .replace(/&[a-z]+;/g, '')

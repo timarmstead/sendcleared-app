@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import DashboardHeader from '@/components/DashboardHeader'
 
 type Report = {
   score: number
@@ -140,31 +141,7 @@ export default function ReportPage() {
       background: '#f7f7f5',
       fontFamily: '-apple-system, sans-serif',
     }}>
-      {/* Header */}
-      <div style={{
-        background: '#f26600',
-        padding: '0 2rem',
-        height: '64px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: '17px' }}>SendCleared</span>
-        <button
-          onClick={() => router.back()}
-          style={{
-            background: 'transparent',
-            border: '1px solid rgba(255,255,255,0.5)',
-            color: '#fff',
-            padding: '6px 14px',
-            borderRadius: '6px',
-            fontSize: '13px',
-            cursor: 'pointer',
-          }}
-        >
-          ← Back
-        </button>
-      </div>
+      <DashboardHeader showBack />
 
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '2.5rem 2rem' }}>
 
@@ -363,7 +340,16 @@ export default function ReportPage() {
 
               {linkError && (
                 <p style={{ color: '#ffb4b4', fontSize: '12px', marginTop: '10px' }}>
-                  {linkError}
+                  {linkError.includes('Visit Billing')
+                    ? (
+                      <>
+                        {linkError.replace('Visit Billing to upgrade.', '')}
+                        <a href="/dashboard/billing" style={{ color: '#4ade80', textDecoration: 'underline' }}>
+                          Visit Billing to upgrade.
+                        </a>
+                      </>
+                    )
+                    : linkError}
                 </p>
               )}
 

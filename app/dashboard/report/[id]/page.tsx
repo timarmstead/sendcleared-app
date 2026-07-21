@@ -78,7 +78,12 @@ export default function ReportPage() {
         body: JSON.stringify({ campaign_id: campaignId }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to generate link')
+      if (!res.ok) {
+        if (data.limit_reached) {
+          throw new Error(data.error + ' Visit Billing to upgrade.')
+        }
+        throw new Error(data.error || 'Failed to generate link')
+      }
       setApprovalLink(`${window.location.origin}/r/${data.token}`)
     } catch (err: any) {
       setLinkError(err.message)

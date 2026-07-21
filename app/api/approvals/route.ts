@@ -10,6 +10,8 @@ function generateToken(length = 24) {
   return token
 }
 
+const FREE_TIER_MONTHLY_LIMIT = 3
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
 
@@ -51,6 +53,34 @@ export async function POST(request: NextRequest) {
 
   if (existing) {
     return NextResponse.json({ token: existing.token })
+  }
+
+  // Free tier: enforce monthly limit on NEW link generation
+  const { data: subscription } = await supabase
+    .from('subscriptions')
+    .select('plan, status')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const isPaid = subscription?.status === 'active' && subscription.plan !== 'free'
+
+  if (!isPaid) {
+    const startOfMonth = new Date()
+    startOfMonth.setDate(1)
+    startOfMonth.setHours(0, 0, 0, 0)
+
+    const { count } = await supabase
+      .from('approvals')
+      .select('id, campaigns!inner(client_id, clients!inner(user_id))', { count: 'exact', head: true })
+      .eq('campaigns.clients.user_id', user.id)
+      .gte('created_at', startOfMonth.toISOString())
+
+    if ((count ?? 0) >= FREE_TIER_MONTHLY_LIMIT) {
+      return NextResponse.json({
+        error: `You've used your ${FREE_TIER_MONTHLY_LIMIT} free approval links this month. Upgrade for unlimited links.`,
+        limit_reached: true,
+      }, { status: 403 })
+    }
   }
 
   const token = generateToken()

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import DashboardHeader from '@/components/DashboardHeader'
 
 type Client = {
   id: string
@@ -16,7 +17,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [newClientName, setNewClientName] = useState('')
   const [adding, setAdding] = useState(false)
-  const [userEmail, setUserEmail] = useState('')
   const router = useRouter()
 
   useEffect(() => {
@@ -30,8 +30,6 @@ export default function Dashboard() {
       router.push('/login')
       return
     }
-
-    setUserEmail(user.email || '')
 
     const { data, error } = await supabase
       .from('clients')
@@ -70,11 +68,6 @@ export default function Dashboard() {
     setAdding(false)
   }
 
-  async function handleLogout() {
-    await supabase.auth.signOut()
-    router.push('/login')
-  }
-
   if (loading) {
     return (
       <div style={{ padding: '3rem', fontFamily: '-apple-system, sans-serif' }}>
@@ -89,38 +82,7 @@ export default function Dashboard() {
       background: '#f7f7f5',
       fontFamily: '-apple-system, sans-serif',
     }}>
-      {/* Header */}
-      <div style={{
-        background: '#f26600',
-        padding: '0 2rem',
-        height: '64px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: '17px' }}>
-          SendCleared
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: '13px' }}>
-            {userEmail}
-          </span>
-          <button
-            onClick={handleLogout}
-            style={{
-              background: 'transparent',
-              border: '1px solid rgba(255,255,255,0.5)',
-              color: '#fff',
-              padding: '6px 14px',
-              borderRadius: '6px',
-              fontSize: '13px',
-              cursor: 'pointer',
-            }}
-          >
-            Log out
-          </button>
-        </div>
-      </div>
+      <DashboardHeader />
 
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '2.5rem 2rem' }}>
         <h1 style={{

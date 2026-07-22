@@ -31,13 +31,32 @@ function decodeQP(str: string): string {
     )
 }
 
+// Removes hidden preheader/padding divs (display:none) before extracting visible text —
+// these often contain hundreds of invisible Unicode spacer characters that would otherwise
+// silently eat up the character budget before any real body copy is even reached
+function stripHiddenDivs(html: string): string {
+  return html.replace(
+    /<div[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+    ' '
+  )
+}
+
 function extractTextFromHtml(html: string): string {
-  return html
+  return stripHiddenDivs(html)
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+// Truncates at the last whitespace boundary rather than a hard character cut,
+// so we never hand Claude a mid-word fragment that looks like a rendering bug
+function truncateAtWordBoundary(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text
+  const slice = text.substring(0, maxLength)
+  const lastSpace = slice.lastIndexOf(' ')
+  return lastSpace > 0 ? slice.substring(0, lastSpace) : slice
 }
 
 function extractLinksFromHtml(html: string): string[] {
@@ -91,18 +110,12 @@ function checkUTM(htmlLinks: string[]): {
   return { missing, total, espTracked: false }
 }
 
-// Detects duplicated consecutive words (e.g. "to to", "the the") deterministically —
-// too easy for an LLM to skim past in a long block of text
 function detectDuplicateWords(text: string): string[] {
   const matches = [...text.matchAll(/\b(\w+)\s+\1\b/gi)]
   const found = matches.map(m => m[0])
   return [...new Set(found.map(f => f.toLowerCase()))]
 }
 
-// Responsive emails commonly repeat the same copy twice — once styled for desktop,
-// once for mobile, toggled via CSS media queries. Collapse exact-duplicate sentence-length
-// blocks before sending text to Claude, so it never sees (and never falsely flags) intentional
-// desktop/mobile duplication.
 function collapseDuplicateBlocks(text: string): { text: string; collapsedCount: number } {
   const chunks = text.split(/(?<=[.!?])\s+/)
   const seen = new Map<string, number>()
@@ -112,7 +125,6 @@ function collapseDuplicateBlocks(text: string): { text: string; collapsedCount: 
   for (const chunk of chunks) {
     const trimmed = chunk.trim()
     const key = trimmed.toLowerCase()
-    // Only dedupe substantial chunks — short fragments ("Thanks." "Hi,") are fine to repeat
     if (trimmed.length > 30 && seen.has(key)) {
       collapsedCount++
       continue
@@ -152,12 +164,10 @@ export async function runQA(email: {
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(htmlLinks)
 
-  // Run duplicate-word detection on the FULL text before any truncation
   const duplicateWords = detectDuplicateWords(rawTextContent)
 
-  // Collapse desktop/mobile duplicate blocks before truncating/sending to Claude
   const { text: dedupedText, collapsedCount } = collapseDuplicateBlocks(rawTextContent)
-  const textContent = dedupedText.substring(0, 2000)
+  const textContent = truncateAtWordBoundary(dedupedText, 2000)
 
   const deterministicChecks = [
     mergeTags.length > 0
@@ -212,7 +222,6 @@ export async function runQA(email: {
     .replace(/\\/g, '')
     .replace(/"/g, "'")
     .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
-    .substring(0, 1500)
 
   const safeSubject = sanitiseForJson(email.subject)
   const safeFrom = sanitiseForJson(email.from)
@@ -229,6 +238,8 @@ export async function runQA(email: {
     'PRE-CHECKED FINDINGS — these are facts, do not contradict:',
     ...deterministicChecks,
     '',
+    'IMPORTANT: The email text content below has been truncated to a reasonable length for processing, cut cleanly at a word boundary. This is a normal part of QA processing, not a rendering defect — do NOT flag this as "truncated content" or a "rendering issue" in your response.',
+    '',
     'Email text content (desktop/mobile duplicate blocks already consolidated — treat as single copy):',
     safeTextContent,
   ].join('\n')
@@ -241,6 +252,7 @@ RULES:
 - If ESP tracking is confirmed with UTM pass, do not flag UTM issues anywhere in your response
 - Duplicated consecutive words have ALREADY been checked deterministically (see PRE-CHECKED FINDINGS) — do not re-check for this yourself, just reflect the given finding in the Content & copy section
 - Repeated content blocks (desktop vs mobile copy) have ALREADY been consolidated before you received this text — never flag "duplicate content" or "repeated paragraph" as an issue, since what you're reading is already deduplicated
+- The email text content is truncated for processing purposes only — never flag this as a rendering or content-cutoff issue
 - Use single quotes only in all text fields — never double quotes inside strings
 - Keep all issue text under 100 characters
 

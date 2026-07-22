@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
     }
 
     const subject = body['headers[subject]'] || ''
-    const from = body['envelope[from]'] || body['headers[from]'] || ''
+    const from = body['headers[from]'] || body['envelope[from]'] || ''
     const html = body['html'] || ''
     const plainText = body['plain'] || ''
 

@@ -38,7 +38,6 @@ function extractTextFromHtml(html: string): string {
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .substring(0, 2000)
 }
 
 function extractLinksFromHtml(html: string): string[] {
@@ -80,20 +79,49 @@ function checkUTM(htmlLinks: string[]): {
 } {
   const total = htmlLinks.length
 
-  // Check if ESP tracking domains are present
   const espTracked = htmlLinks.some(l =>
     ESP_TRACKING_DOMAINS.some(domain => l.includes(domain))
   )
 
-  // If ESP tracking is active, UTMs are embedded in the redirect chain
-  // Do not check destination URLs — they won't have UTMs directly
   if (espTracked) {
     return { missing: 0, total, espTracked: true }
   }
 
-  // No ESP tracking — check links directly for UTM parameters
   const missing = htmlLinks.filter(l => !l.includes('utm_')).length
   return { missing, total, espTracked: false }
+}
+
+// Detects duplicated consecutive words (e.g. "to to", "the the") deterministically —
+// too easy for an LLM to skim past in a long block of text
+function detectDuplicateWords(text: string): string[] {
+  const matches = [...text.matchAll(/\b(\w+)\s+\1\b/gi)]
+  const found = matches.map(m => m[0])
+  return [...new Set(found.map(f => f.toLowerCase()))]
+}
+
+// Responsive emails commonly repeat the same copy twice — once styled for desktop,
+// once for mobile, toggled via CSS media queries. Collapse exact-duplicate sentence-length
+// blocks before sending text to Claude, so it never sees (and never falsely flags) intentional
+// desktop/mobile duplication.
+function collapseDuplicateBlocks(text: string): { text: string; collapsedCount: number } {
+  const chunks = text.split(/(?<=[.!?])\s+/)
+  const seen = new Map<string, number>()
+  const result: string[] = []
+  let collapsedCount = 0
+
+  for (const chunk of chunks) {
+    const trimmed = chunk.trim()
+    const key = trimmed.toLowerCase()
+    // Only dedupe substantial chunks — short fragments ("Thanks." "Hi,") are fine to repeat
+    if (trimmed.length > 30 && seen.has(key)) {
+      collapsedCount++
+      continue
+    }
+    seen.set(key, (seen.get(key) || 0) + 1)
+    result.push(trimmed)
+  }
+
+  return { text: result.join(' '), collapsedCount }
 }
 
 function sanitiseForJson(str: string): string {
@@ -115,20 +143,34 @@ export async function runQA(email: {
   plainText: string
   links: string[]
 }) {
-  // Decode QP encoding
   const decodedHtml = decodeQP(email.html)
   const decodedPlain = decodeQP(email.plainText)
 
   const htmlLinks = extractLinksFromHtml(decodedHtml)
-  const textContent = extractTextFromHtml(decodedHtml)
+  const rawTextContent = extractTextFromHtml(decodedHtml)
   const altTexts = extractAltTexts(decodedHtml)
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(htmlLinks)
+
+  // Run duplicate-word detection on the FULL text before any truncation
+  const duplicateWords = detectDuplicateWords(rawTextContent)
+
+  // Collapse desktop/mobile duplicate blocks before truncating/sending to Claude
+  const { text: dedupedText, collapsedCount } = collapseDuplicateBlocks(rawTextContent)
+  const textContent = dedupedText.substring(0, 2000)
 
   const deterministicChecks = [
     mergeTags.length > 0
       ? `CRITICAL: Unresolved merge tags found: ${mergeTags.join(', ')}`
       : 'PASS: No unresolved merge tags detected',
+
+    duplicateWords.length > 0
+      ? `CRITICAL: Duplicated consecutive word(s) found: ${duplicateWords.join(', ')}`
+      : 'PASS: No duplicated consecutive words detected',
+
+    collapsedCount > 0
+      ? `INFO: Detected ${collapsedCount} repeated content block(s), consistent with separate desktop/mobile copy — this is normal for responsive templates and has not been flagged as an error`
+      : 'INFO: No repeated content blocks detected',
 
     utmCheck.espTracked
       ? `PASS: ESP link tracking confirmed — UTM parameters are tracked via redirect chain (standard for Klaviyo, Braze, Mailchimp etc)`
@@ -187,7 +229,7 @@ export async function runQA(email: {
     'PRE-CHECKED FINDINGS — these are facts, do not contradict:',
     ...deterministicChecks,
     '',
-    'Email text content:',
+    'Email text content (desktop/mobile duplicate blocks already consolidated — treat as single copy):',
     safeTextContent,
   ].join('\n')
 
@@ -197,13 +239,15 @@ RULES:
 - Sending from a subdomain (send.domain.com, mail.domain.com) is normal for ESPs — never flag this
 - The PRE-CHECKED FINDINGS below are accurate and deterministic — never contradict them
 - If ESP tracking is confirmed with UTM pass, do not flag UTM issues anywhere in your response
+- Duplicated consecutive words have ALREADY been checked deterministically (see PRE-CHECKED FINDINGS) — do not re-check for this yourself, just reflect the given finding in the Content & copy section
+- Repeated content blocks (desktop vs mobile copy) have ALREADY been consolidated before you received this text — never flag "duplicate content" or "repeated paragraph" as an issue, since what you're reading is already deduplicated
 - Use single quotes only in all text fields — never double quotes inside strings
 - Keep all issue text under 100 characters
 
 PROOFREADING REQUIREMENT — this is mandatory, not optional:
 - Carefully read the "Email text content" below word by word, as a professional proofreader would, not just skimming for tone or messaging quality
-- Explicitly check for: duplicated consecutive words (e.g. 'to to', 'the the', 'and and'), missing words, misspellings, incorrect punctuation, and grammatical errors
-- If ANY duplicated word, typo, or grammatical error is found in the subject line, preview text, or body copy, it MUST be flagged as a "critical" or "warning" issue in the "Content & copy" section, quoting the exact error found
+- Explicitly check for: missing words, misspellings, incorrect punctuation, and grammatical errors (duplicated words are already handled above — don't re-flag)
+- If ANY typo or grammatical error is found in the subject line, preview text, or body copy, it MUST be flagged as a "critical" or "warning" issue in the "Content & copy" section, quoting the exact error found
 - Do not report "Content & copy" as fully passing unless you have actually checked every sentence for these specific error types
 
 ${meta}

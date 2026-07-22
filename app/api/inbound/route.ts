@@ -8,6 +8,56 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+function stripInvisibleChars(raw: string): string {
+  return raw
+    .split('')
+    .filter(char => {
+      const code = char.charCodeAt(0)
+      if (code <= 0x001F) return false
+      if (code === 0x00AD) return false
+      if (code === 0x034F) return false
+      if (code >= 0x200B && code <= 0x200F) return false
+      if (code >= 0x202A && code <= 0x202E) return false
+      if (code >= 0x2060 && code <= 0x2064) return false
+      if (code === 0x2007) return false
+      if (code === 0xFEFF) return false
+      return true
+    })
+    .join('')
+}
+
+// Reliably extracts the hidden preheader text from an HTML email.
+// Only searches AFTER <body> begins, and only matches actual <div> tags —
+// never CSS rules inside <style>/<head> that happen to contain the text "display:none".
+function extractPreheaderFromHtml(html: string): string {
+  const bodyIdx = html.search(/<body[\s>]/i)
+  if (bodyIdx === -1) return ''
+
+  const bodyContent = html.substring(bodyIdx)
+
+  // Match <div ...style="...display:none...">TEXT</div> — non-greedy, restricted to body content only
+  const divMatches = [...bodyContent.matchAll(
+    /<div[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi
+  )]
+
+  for (const match of divMatches) {
+    let inner = match[1]
+    // Strip any nested tags (spans etc.) inside the hidden div
+    inner = inner.replace(/<[^>]+>/g, ' ')
+    inner = inner.replace(/&nbsp;/g, ' ')
+    inner = stripInvisibleChars(inner)
+    inner = inner.replace(/\s+/g, ' ').trim()
+
+    // Skip empty/padding divs (e.g. walls of zero-width characters) — real preheader
+    // text should have actual readable words in it
+    if (inner.length > 3 && /[a-zA-Z]{3,}/.test(inner)) {
+      return inner.substring(0, 150)
+    }
+  }
+
+  return ''
+}
+
 export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get('content-type') || ''
@@ -73,33 +123,15 @@ export async function POST(req: NextRequest) {
 
     const parsed = parseEmail(html || plainText)
 
-    // Extract preheader directly in route for reliability
-    let preheader = parsed.preheader || ''
-    if (!preheader && html) {
-      const noneIdx = html.indexOf('display:none')
-      if (noneIdx > -1) {
-        const tagClose = html.indexOf('>', noneIdx)
-        const divClose = html.indexOf('</div>', tagClose)
-        if (tagClose > -1 && divClose > -1) {
-          let raw = html.substring(tagClose + 1, divClose)
-          raw = raw.replace(/\r\n/g, ' ').replace(/\r/g, ' ').replace(/\n/g, ' ')
-          const filtered = raw.split('').filter(char => {
-            const code = char.charCodeAt(0)
-            if (code <= 0x001F) return false
-            if (code === 0x00AD) return false
-            if (code === 0x034F) return false
-            if (code >= 0x200B && code <= 0x200F) return false
-            if (code >= 0x202A && code <= 0x202E) return false
-            if (code >= 0x2060 && code <= 0x2064) return false
-            if (code === 0x2007) return false
-            if (code === 0xFEFF) return false
-            return true
-          }).join('').replace(/&nbsp;/g, '').replace(/\s+/g, ' ').trim()
-          if (filtered.length > 3) {
-            preheader = filtered.substring(0, 150)
-          }
-        }
-      }
+    // Preheader extraction: try the robust body-scoped div matcher first,
+    // since it correctly avoids CSS/head content that broke the old logic.
+    // Fall back to parseEmail's own extraction only if this finds nothing.
+    let preheader = ''
+    if (html) {
+      preheader = extractPreheaderFromHtml(html)
+    }
+    if (!preheader) {
+      preheader = parsed.preheader || ''
     }
 
     console.log('Final preheader:', preheader)

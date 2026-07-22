@@ -200,6 +200,12 @@ RULES:
 - Use single quotes only in all text fields — never double quotes inside strings
 - Keep all issue text under 100 characters
 
+PROOFREADING REQUIREMENT — this is mandatory, not optional:
+- Carefully read the "Email text content" below word by word, as a professional proofreader would, not just skimming for tone or messaging quality
+- Explicitly check for: duplicated consecutive words (e.g. 'to to', 'the the', 'and and'), missing words, misspellings, incorrect punctuation, and grammatical errors
+- If ANY duplicated word, typo, or grammatical error is found in the subject line, preview text, or body copy, it MUST be flagged as a "critical" or "warning" issue in the "Content & copy" section, quoting the exact error found
+- Do not report "Content & copy" as fully passing unless you have actually checked every sentence for these specific error types
+
 ${meta}
 
 Return this exact JSON:

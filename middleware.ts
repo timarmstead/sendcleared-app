@@ -23,14 +23,25 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refreshes the session if expired — required for Server Components/Route Handlers
-  await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  const path = request.nextUrl.pathname
+  const isDashboardRoute = path.startsWith('/dashboard')
+  const isAuthPage = path === '/login' || path === '/signup'
+
+  if (isDashboardRoute && !user) {
+    const redirectUrl = new URL('/login', request.url)
+    return NextResponse.redirect(redirectUrl)
+  }
+
+  if (isAuthPage && user) {
+    const redirectUrl = new URL('/dashboard', request.url)
+    return NextResponse.redirect(redirectUrl)
+  }
 
   return supabaseResponse
 }
 
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
+  matcher: ['/dashboard/:path*', '/login', '/signup'],
 }

@@ -26,30 +26,23 @@ function stripInvisibleChars(raw: string): string {
     .join('')
 }
 
-// Reliably extracts the hidden preheader text from an HTML email.
-// Only searches AFTER <body> begins, and only matches actual <div> tags —
-// never CSS rules inside <style>/<head> that happen to contain the text "display:none".
 function extractPreheaderFromHtml(html: string): string {
   const bodyIdx = html.search(/<body[\s>]/i)
   if (bodyIdx === -1) return ''
 
   const bodyContent = html.substring(bodyIdx)
 
-  // Match <div ...style="...display:none...">TEXT</div> — non-greedy, restricted to body content only
   const divMatches = [...bodyContent.matchAll(
     /<div[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi
   )]
 
   for (const match of divMatches) {
     let inner = match[1]
-    // Strip any nested tags (spans etc.) inside the hidden div
     inner = inner.replace(/<[^>]+>/g, ' ')
     inner = inner.replace(/&nbsp;/g, ' ')
     inner = stripInvisibleChars(inner)
     inner = inner.replace(/\s+/g, ' ').trim()
 
-    // Skip empty/padding divs (e.g. walls of zero-width characters) — real preheader
-    // text should have actual readable words in it
     if (inner.length > 3 && /[a-zA-Z]{3,}/.test(inner)) {
       return inner.substring(0, 150)
     }
@@ -118,14 +111,12 @@ export async function POST(req: NextRequest) {
 
     const subject = body['headers[subject]'] || ''
     const from = body['headers[from]'] || body['envelope[from]'] || ''
+    const replyTo = body['headers[reply-to]'] || ''
     const html = body['html'] || ''
     const plainText = body['plain'] || ''
 
     const parsed = parseEmail(html || plainText)
 
-    // Preheader extraction: try the robust body-scoped div matcher first,
-    // since it correctly avoids CSS/head content that broke the old logic.
-    // Fall back to parseEmail's own extraction only if this finds nothing.
     let preheader = ''
     if (html) {
       preheader = extractPreheaderFromHtml(html)
@@ -135,6 +126,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log('Final preheader:', preheader)
+    console.log('Reply-to:', replyTo || '(none detected)')
 
     const links = parsed.links || []
     console.log('Storing campaign:', subject)
@@ -145,6 +137,7 @@ export async function POST(req: NextRequest) {
         client_id: client.id,
         subject,
         from_address: from,
+        reply_to: replyTo || null,
         preheader,
         html_body: html,
         plain_text: plainText,
@@ -172,6 +165,7 @@ export async function POST(req: NextRequest) {
         score: qaResult.score,
         summary: qaResult.summary,
         sections: qaResult.sections,
+        ctas: qaResult.ctas || [],
       })
 
     if (reportError) {

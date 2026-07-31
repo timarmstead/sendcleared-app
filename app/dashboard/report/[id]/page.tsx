@@ -16,12 +16,14 @@ type Report = {
       text: string
     }[]
   }[]
+  ctas: { label: string; url: string }[]
 }
 
 type Campaign = {
   id: string
   subject: string
   from_address: string
+  reply_to: string | null
   preheader: string
   received_at: string
   client_id: string
@@ -166,6 +168,9 @@ export default function ReportPage() {
             <p style={{ fontSize: '13px', color: '#9a9891' }}>
               From {campaign.from_address} · {new Date(campaign.received_at).toLocaleString()}
             </p>
+            <p style={{ fontSize: '13px', color: '#9a9891', marginTop: '2px' }}>
+              Reply-to: {campaign.reply_to || 'Not set'}
+            </p>
             {report && (
               <p style={{ fontSize: '13px', color: '#5a5a56', marginTop: '4px' }}>
                 {report.sections?.flatMap(s => s.issues).filter(i => i.severity === 'critical').length} critical ·{' '}
@@ -294,6 +299,52 @@ export default function ReportPage() {
                 })}
               </div>
             ))}
+
+            {/* CTAs & links — collapsible */}
+            {report.ctas && report.ctas.length > 0 && (
+              <details style={{
+                background: '#fff',
+                borderRadius: '10px',
+                border: '1px solid rgba(0,0,0,0.09)',
+                padding: '0.75rem 1.25rem',
+                marginBottom: '8px',
+              }}>
+                <summary style={{
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#0f1117',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                }}>
+                  View all CTAs and links ({report.ctas.length})
+                </summary>
+                <div style={{ marginTop: '10px' }}>
+                  {report.ctas.map((cta, i) => (
+                    <div key={i} style={{
+                      padding: '8px 0',
+                      borderBottom: i < report.ctas.length - 1 ? '0.5px solid rgba(0,0,0,0.07)' : 'none',
+                    }}>
+                      <p style={{ fontSize: '13px', fontWeight: 500, color: '#0f1117', marginBottom: '2px' }}>
+                        {cta.label}
+                      </p>
+                      <a
+                        href={cta.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          fontSize: '12px',
+                          color: '#134e8e',
+                          wordBreak: 'break-all',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        {cta.url}
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
 
             {/* Approval CTA */}
             <div style={{

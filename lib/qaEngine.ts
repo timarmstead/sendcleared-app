@@ -31,9 +31,6 @@ function decodeQP(str: string): string {
     )
 }
 
-// Removes hidden preheader/padding divs (display:none) before extracting visible text —
-// these often contain hundreds of invisible Unicode spacer characters that would otherwise
-// silently eat up the character budget before any real body copy is even reached
 function stripHiddenDivs(html: string): string {
   return html.replace(
     /<div[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
@@ -50,8 +47,6 @@ function extractTextFromHtml(html: string): string {
     .trim()
 }
 
-// Truncates at the last whitespace boundary rather than a hard character cut,
-// so we never hand Claude a mid-word fragment that looks like a rendering bug
 function truncateAtWordBoundary(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text
   const slice = text.substring(0, maxLength)
@@ -65,6 +60,50 @@ function extractLinksFromHtml(html: string): string[] {
     .map(m => m[1])
     .filter(url => url.startsWith('http'))
     .slice(0, 20)
+}
+
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+}
+
+// Extracts every link in the email along with its visible label/text —
+// deterministic (regex-based), not AI-dependent, since identifying "what text
+// belongs to which link" is exact structural parsing, not something worth
+// leaving to a model's judgment
+function extractCtasFromHtml(html: string): { label: string; url: string }[] {
+  const stripped = stripHiddenDivs(html)
+  const matches = [...stripped.matchAll(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)]
+
+  const seen = new Set<string>()
+  const results: { label: string; url: string }[] = []
+
+  for (const match of matches) {
+    const url = match[1]
+    if (!url.startsWith('http')) continue
+    if (seen.has(url)) continue
+
+    let label = match[2]
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    label = decodeHtmlEntities(label)
+
+    if (!label || label.length < 2) continue
+    if (label.length > 60) label = label.substring(0, 57).trim() + '...'
+
+    seen.add(url)
+    results.push({ label, url })
+
+    if (results.length >= 30) break
+  }
+
+  return results
 }
 
 function extractAltTexts(html: string): { missing: number; total: number } {
@@ -163,6 +202,7 @@ export async function runQA(email: {
   const altTexts = extractAltTexts(decodedHtml)
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(htmlLinks)
+  const ctas = extractCtasFromHtml(decodedHtml)
 
   const duplicateWords = detectDuplicateWords(rawTextContent)
 
@@ -333,7 +373,8 @@ Each section: 3-4 issues. Severity: critical, warning, info, or pass.`
   const jsonString = cleaned.substring(start, end + 1)
 
   try {
-    return JSON.parse(jsonString)
+    const parsed = JSON.parse(jsonString)
+    return { ...parsed, ctas }
   } catch (parseError) {
     console.error('JSON parse error:', jsonString.substring(0, 500))
     throw new Error(`JSON parse failed: ${parseError}`)

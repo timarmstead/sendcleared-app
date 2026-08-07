@@ -72,10 +72,6 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&quot;/g, '"')
 }
 
-// Extracts every link in the email along with its visible label/text —
-// deterministic (regex-based), not AI-dependent, since identifying "what text
-// belongs to which link" is exact structural parsing, not something worth
-// leaving to a model's judgment
 function extractCtasFromHtml(html: string): { label: string; url: string }[] {
   const stripped = stripHiddenDivs(html)
   const matches = [...stripped.matchAll(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)]
@@ -104,6 +100,59 @@ function extractCtasFromHtml(html: string): { label: string; url: string }[] {
   }
 
   return results
+}
+
+// Follows redirects to find the real destination behind an ESP tracking/click link.
+// ESP click-tracking wraps the actual URL server-side — it's never present in the raw
+// HTML, so the only way to find it is a live HTTP request following the redirect chain.
+async function resolveDestinationUrl(url: string, timeoutMs = 5000): Promise<{ resolved: string; failed: boolean }> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; SendClearedBot/1.0; +https://sendcleared.com)',
+      },
+    })
+    clearTimeout(timeout)
+    // Cancel the body — we only need the final URL, not the page content
+    response.body?.cancel().catch(() => {})
+    return { resolved: response.url || url, failed: false }
+  } catch {
+    clearTimeout(timeout)
+    return { resolved: url, failed: true }
+  }
+}
+
+// Resolves all CTA links in parallel (bounded by individual timeouts), so total added
+// latency stays close to a single timeout rather than the sum of all of them
+async function resolveAllCtas(
+  ctas: { label: string; url: string }[]
+): Promise<{ label: string; url: string; trackingUrl?: string; unresolved?: boolean }[]> {
+  const results = await Promise.allSettled(
+    ctas.map(async cta => {
+      const isTracked = ESP_TRACKING_DOMAINS.some(domain => cta.url.includes(domain))
+      if (!isTracked) {
+        return { label: cta.label, url: cta.url }
+      }
+
+      const { resolved, failed } = await resolveDestinationUrl(cta.url)
+
+      if (failed || resolved === cta.url) {
+        return { label: cta.label, url: cta.url, unresolved: true }
+      }
+
+      return { label: cta.label, url: resolved, trackingUrl: cta.url }
+    })
+  )
+
+  return results.map((r, i) =>
+    r.status === 'fulfilled' ? r.value : { label: ctas[i].label, url: ctas[i].url, unresolved: true }
+  )
 }
 
 function extractAltTexts(html: string): { missing: number; total: number } {
@@ -202,7 +251,9 @@ export async function runQA(email: {
   const altTexts = extractAltTexts(decodedHtml)
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(htmlLinks)
-  const ctas = extractCtasFromHtml(decodedHtml)
+
+  const rawCtas = extractCtasFromHtml(decodedHtml)
+  const ctas = await resolveAllCtas(rawCtas)
 
   const duplicateWords = detectDuplicateWords(rawTextContent)
 

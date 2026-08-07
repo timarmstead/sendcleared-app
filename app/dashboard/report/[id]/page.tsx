@@ -16,7 +16,7 @@ type Report = {
       text: string
     }[]
   }[]
-  ctas: { label: string; url: string }[]
+  ctas: { label: string; url: string; trackingUrl?: string; unresolved?: boolean }[]
 }
 
 type Campaign = {
@@ -327,7 +327,7 @@ export default function ReportPage() {
                       <p style={{ fontSize: '13px', fontWeight: 500, color: '#0f1117', marginBottom: '2px' }}>
                         {cta.label}
                       </p>
-                      <a
+                        <a
                         href={cta.url}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -340,6 +340,16 @@ export default function ReportPage() {
                       >
                         {cta.url}
                       </a>
+                      {cta.trackingUrl && (
+                        <p style={{ fontSize: '11px', color: '#9a9891', marginTop: '2px' }}>
+                          Resolved from ESP tracking link
+                        </p>
+                      )}
+                      {cta.unresolved && (
+                        <p style={{ fontSize: '11px', color: '#b06d10', marginTop: '2px' }}>
+                          ⚠ Could not resolve destination — showing tracking link
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>

@@ -5,7 +5,7 @@ const anthropic = new Anthropic({
 })
 
 const ESP_TRACKING_DOMAINS = [
-  'trk.klclick.com', 'klclick.com',
+  'trk.klclick.com', 'klclick.com', 'ctrk.klclick1.com', 'klclick1.com',
   'click.braze.com', 'links.braze.com',
   'tracking.omnisend.com', 'omnisnd.com',
   'click.brevo.com', 'r.brevo.com', 'clicks.sib-sg.com',
@@ -21,6 +21,7 @@ const ESP_TRACKING_DOMAINS = [
   'mailgun.org',
   'links.drip.com',
   'email.moosend.com',
+  'manage.kmail-lists.com',
 ]
 
 function decodeQP(str: string): string {
@@ -72,6 +73,11 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&quot;/g, '"')
 }
 
+// Extracts every link along with a usable label. Many email CTAs are images with
+// no visible text (a logo, a product photo wrapped in a link) — if there's no
+// text content, fall back to the image's alt attribute, and only as a last
+// resort use a generic label. Never silently drop a link just because it has
+// no visible text, since that was hiding image-based CTAs from the report entirely.
 function extractCtasFromHtml(html: string): { label: string; url: string }[] {
   const stripped = stripHiddenDivs(html)
   const matches = [...stripped.matchAll(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)]
@@ -84,13 +90,27 @@ function extractCtasFromHtml(html: string): { label: string; url: string }[] {
     if (!url.startsWith('http')) continue
     if (seen.has(url)) continue
 
-    let label = match[2]
+    const inner = match[2]
+
+    let label = inner
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
     label = decodeHtmlEntities(label)
 
-    if (!label || label.length < 2) continue
+    // No visible text — fall back to the alt text of an image inside the link
+    if (!label || label.length < 2) {
+      const altMatch = inner.match(/<img[^>]*\balt=["']([^"']*)["'][^>]*>/i)
+      if (altMatch && altMatch[1].trim().length > 1) {
+        label = decodeHtmlEntities(altMatch[1].trim())
+      }
+    }
+
+    // Still nothing — include it anyway rather than silently dropping the link
+    if (!label || label.length < 2) {
+      label = 'Image link'
+    }
+
     if (label.length > 60) label = label.substring(0, 57).trim() + '...'
 
     seen.add(url)
@@ -102,9 +122,6 @@ function extractCtasFromHtml(html: string): { label: string; url: string }[] {
   return results
 }
 
-// Follows redirects to find the real destination behind an ESP tracking/click link.
-// ESP click-tracking wraps the actual URL server-side — it's never present in the raw
-// HTML, so the only way to find it is a live HTTP request following the redirect chain.
 async function resolveDestinationUrl(url: string, timeoutMs = 5000): Promise<{ resolved: string; failed: boolean }> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -119,7 +136,6 @@ async function resolveDestinationUrl(url: string, timeoutMs = 5000): Promise<{ r
       },
     })
     clearTimeout(timeout)
-    // Cancel the body — we only need the final URL, not the page content
     response.body?.cancel().catch(() => {})
     return { resolved: response.url || url, failed: false }
   } catch {
@@ -128,8 +144,6 @@ async function resolveDestinationUrl(url: string, timeoutMs = 5000): Promise<{ r
   }
 }
 
-// Resolves all CTA links in parallel (bounded by individual timeouts), so total added
-// latency stays close to a single timeout rather than the sum of all of them
 async function resolveAllCtas(
   ctas: { label: string; url: string }[]
 ): Promise<{ label: string; url: string; trackingUrl?: string; unresolved?: boolean }[]> {

@@ -21,6 +21,7 @@ export default function ClientDetail() {
   const [client, setClient] = useState<ClientData | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
   const router = useRouter()
   const params = useParams()
   const clientId = params.id as string
@@ -58,7 +59,8 @@ export default function ClientDetail() {
   function copyAddress() {
     if (client) {
       navigator.clipboard.writeText(client.inbox_address)
-      alert('Copied to clipboard!')
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     }
   }
 
@@ -100,14 +102,41 @@ export default function ClientDetail() {
             padding: '1rem 1.25rem',
             marginBottom: '2rem',
             cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
           }}
         >
-          <p style={{ fontSize: '11px', color: '#9a9891', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: '4px' }}>
-            Test inbox address — click to copy
-          </p>
-          <p style={{ fontSize: '14px', color: '#f26600', fontFamily: 'monospace' }}>
-            {client.inbox_address}
-          </p>
+          <div>
+            <p style={{ fontSize: '11px', color: '#9a9891', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: '4px' }}>
+              Test inbox address — click to copy
+            </p>
+            <p style={{ fontSize: '14px', color: '#f26600', fontFamily: 'monospace' }}>
+              {client.inbox_address}
+            </p>
+          </div>
+
+          <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {copied && (
+              <span style={{ fontSize: '12px', color: '#27500a', fontWeight: 600 }}>
+                Copied!
+              </span>
+            )}
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke={copied ? '#27500a' : '#9a9891'}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          </div>
         </div>
 
         <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#0f1117', marginBottom: '1rem' }}>

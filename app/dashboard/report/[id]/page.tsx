@@ -165,10 +165,10 @@ export default function ReportPage() {
             }}>
               "{campaign.subject || '(no subject)'}"
             </h1>
-            <p style={{ fontSize: '13px', color: '#9a9891' }}>
+            <p style={{ fontSize: '13px', color: '#5a5a56' }}>
               From {campaign.from_address} · {new Date(campaign.received_at).toLocaleString()}
             </p>
-            <p style={{ fontSize: '13px', color: '#9a9891', marginTop: '2px' }}>
+            <p style={{ fontSize: '13px', color: '#5a5a56', marginTop: '2px' }}>
               Reply-to: {campaign.reply_to || 'Not set'}
             </p>
             {report && (
@@ -327,7 +327,7 @@ export default function ReportPage() {
                       <p style={{ fontSize: '13px', fontWeight: 500, color: '#0f1117', marginBottom: '2px' }}>
                         {cta.label}
                       </p>
-                        <a
+                      
                         href={cta.url}
                         target="_blank"
                         rel="noopener noreferrer"

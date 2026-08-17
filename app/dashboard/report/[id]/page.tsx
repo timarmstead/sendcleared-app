@@ -327,7 +327,7 @@ export default function ReportPage() {
                       <p style={{ fontSize: '13px', fontWeight: 500, color: '#0f1117', marginBottom: '2px' }}>
                         {cta.label}
                       </p>
-                      
+                        <a
                         href={cta.url}
                         target="_blank"
                         rel="noopener noreferrer"

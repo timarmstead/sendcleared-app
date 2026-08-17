@@ -278,7 +278,7 @@ export default function ApprovalPage() {
             }}>
               "{campaign?.subject || '(no subject)'}"
             </h1>
-            <p style={{ fontSize: '13px', color: '#9a9891' }}>
+            <p style={{ fontSize: '13px', color: '#5a5a56' }}>
               From {campaign?.from_address} · {campaign?.received_at ? new Date(campaign.received_at).toLocaleString() : ''}
             </p>
             <p style={{ fontSize: '13px', color: '#5a5a56', marginTop: '4px' }}>

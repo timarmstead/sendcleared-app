@@ -17,6 +17,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [newClientName, setNewClientName] = useState('')
   const [adding, setAdding] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
+  const [limitReached, setLimitReached] = useState(false)
+  const [canUpgrade, setCanUpgrade] = useState(true)
+  const [archivingId, setArchivingId] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -34,6 +38,7 @@ export default function Dashboard() {
     const { data, error } = await supabase
       .from('clients')
       .select('*')
+      .is('archived_at', null)
       .order('created_at', { ascending: false })
 
     if (!error && data) {
@@ -47,25 +52,46 @@ export default function Dashboard() {
     if (!newClientName.trim()) return
 
     setAdding(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    // Generate unique inbox address at check.sendcleared.com
-    const slug = newClientName.toLowerCase().replace(/[^a-z0-9]/g, '')
-    const randomToken = Math.random().toString(36).substring(2, 6)
-    const inboxAddress = `${slug}-${randomToken}@check.sendcleared.com`
-
-    const { error } = await supabase.from('clients').insert({
-      user_id: user.id,
-      name: newClientName,
-      inbox_address: inboxAddress,
-    })
-
-    if (!error) {
+    setAddError(null)
+    setLimitReached(false)
+    try {
+      const res = await fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newClientName }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        if (data.limit_reached) {
+          setLimitReached(true)
+          setCanUpgrade(data.can_upgrade)
+          throw new Error(data.error)
+        }
+        throw new Error(data.error || 'Failed to add client')
+      }
       setNewClientName('')
       await checkUserAndLoadClients()
+    } catch (err: any) {
+      setAddError(err.message)
+    } finally {
+      setAdding(false)
     }
-    setAdding(false)
+  }
+
+  async function archiveClient(clientId: string, clientName: string) {
+    const confirmed = window.confirm(`Archive ${clientName}? Their campaign history stays intact, but they'll be hidden from your active client list.`)
+    if (!confirmed) return
+
+    setArchivingId(clientId)
+    const { error } = await supabase
+      .from('clients')
+      .update({ archived_at: new Date().toISOString() })
+      .eq('id', clientId)
+
+    if (!error) {
+      await checkUserAndLoadClients()
+    }
+    setArchivingId(null)
   }
 
   if (loading) {
@@ -104,39 +130,60 @@ export default function Dashboard() {
           borderRadius: '12px',
           border: '1px solid rgba(0,0,0,0.09)',
           marginBottom: '1.5rem',
-          display: 'flex',
-          gap: '8px',
         }}>
-          <input
-            type="text"
-            placeholder="Client name e.g. Bright Spark Energy"
-            value={newClientName}
-            onChange={(e) => setNewClientName(e.target.value)}
-            style={{
-              flex: 1,
-              padding: '10px 12px',
-              borderRadius: '8px',
-              border: '1px solid rgba(0,0,0,0.14)',
-              fontSize: '14px',
-            }}
-          />
-          <button
-            type="submit"
-            disabled={adding}
-            style={{
-              padding: '10px 20px',
-              borderRadius: '8px',
-              border: 'none',
-              background: '#f26600',
-              color: '#fff',
-              fontWeight: 600,
-              fontSize: '14px',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {adding ? 'Adding...' : '+ Add client'}
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type="text"
+              placeholder="Client name e.g. Bright Spark Energy"
+              value={newClientName}
+              onChange={(e) => setNewClientName(e.target.value)}
+              style={{
+                flex: 1,
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: '1px solid rgba(0,0,0,0.14)',
+                fontSize: '14px',
+              }}
+            />
+            <button
+              type="submit"
+              disabled={adding}
+              style={{
+                padding: '10px 20px',
+                borderRadius: '8px',
+                border: 'none',
+                background: '#f26600',
+                color: '#fff',
+                fontWeight: 600,
+                fontSize: '14px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {adding ? 'Adding...' : '+ Add client'}
+            </button>
+          </div>
+          {addError && (
+            <p style={{ color: '#791f1f', fontSize: '12px', marginTop: '8px' }}>
+              {addError}
+              {limitReached && !canUpgrade && (
+                <>
+                  {' '}
+                  <a href="mailto:support@sendcleared.com" style={{ color: '#791f1f', textDecoration: 'underline' }}>
+                    support@sendcleared.com
+                  </a>
+                </>
+              )}
+              {limitReached && canUpgrade && (
+                <>
+                  {' '}
+                  <a href="/dashboard/billing" style={{ color: '#791f1f', textDecoration: 'underline' }}>
+                    Visit Billing
+                  </a>
+                </>
+              )}
+            </p>
+          )}
         </form>
 
         {/* Client list */}
@@ -157,19 +204,21 @@ export default function Dashboard() {
             {clients.map((client) => (
               <div
                 key={client.id}
-                onClick={() => router.push(`/dashboard/client/${client.id}`)}
                 style={{
                   background: '#fff',
                   padding: '1rem 1.25rem',
                   borderRadius: '10px',
                   border: '1px solid rgba(0,0,0,0.09)',
-                  cursor: 'pointer',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  gap: '12px',
                 }}
               >
-                <div>
+                <div
+                  onClick={() => router.push(`/dashboard/client/${client.id}`)}
+                  style={{ cursor: 'pointer', flex: 1 }}
+                >
                   <p style={{
                     fontSize: '14px',
                     fontWeight: 600,
@@ -186,7 +235,23 @@ export default function Dashboard() {
                     {client.inbox_address}
                   </p>
                 </div>
-                <span style={{ color: '#9a9891', fontSize: '13px' }}>→</span>
+                <button
+                  onClick={() => archiveClient(client.id, client.name)}
+                  disabled={archivingId === client.id}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid rgba(0,0,0,0.14)',
+                    color: '#5a5a56',
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    cursor: archivingId === client.id ? 'default' : 'pointer',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                  }}
+                >
+                  {archivingId === client.id ? 'Archiving…' : 'Archive'}
+                </button>
               </div>
             ))}
           </div>

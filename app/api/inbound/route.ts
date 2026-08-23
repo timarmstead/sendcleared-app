@@ -26,18 +26,24 @@ function stripInvisibleChars(raw: string): string {
     .join('')
 }
 
+// Reliably extracts the hidden preheader text from an HTML email.
+// Only searches AFTER <body> begins, and matches BOTH <div> and <span> tags
+// (some ESPs — e.g. Mapp Engage — use a hidden <span> instead of a <div> for this,
+// which the earlier div-only version silently missed entirely).
 function extractPreheaderFromHtml(html: string): string {
   const bodyIdx = html.search(/<body[\s>]/i)
   if (bodyIdx === -1) return ''
 
   const bodyContent = html.substring(bodyIdx)
 
-  const divMatches = [...bodyContent.matchAll(
-    /<div[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi
+  // Backreference \1 ensures we match the same tag type on open and close
+  // (div...div or span...span), not a div opening matched to a span closing.
+  const hiddenMatches = [...bodyContent.matchAll(
+    /<(div|span)[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>([\s\S]*?)<\/\1>/gi
   )]
 
-  for (const match of divMatches) {
-    let inner = match[1]
+  for (const match of hiddenMatches) {
+    let inner = match[2]
     inner = inner.replace(/<[^>]+>/g, ' ')
     inner = inner.replace(/&nbsp;/g, ' ')
     inner = stripInvisibleChars(inner)

@@ -34,7 +34,7 @@ function decodeQP(str: string): string {
 
 function stripHiddenDivs(html: string): string {
   return html.replace(
-    /<div[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+    /<(div|span)[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
     ' '
   )
 }
@@ -55,12 +55,22 @@ function truncateAtWordBoundary(text: string, maxLength: number): string {
   return lastSpace > 0 ? slice.substring(0, lastSpace) : slice
 }
 
+// Extracts every unique HTTP(S) link in the email. No artificial cap — a previous
+// hardcoded .slice(0,20) here caused the "N links found" summary count to disagree
+// with the full "View all CTAs and links" list, which had no such cap.
 function extractLinksFromHtml(html: string): string[] {
   const matches = [...html.matchAll(/href=["']([^"']+)["']/gi)]
-  return matches
-    .map(m => m[1])
-    .filter(url => url.startsWith('http'))
-    .slice(0, 20)
+  const seen = new Set<string>()
+  const results: string[] = []
+  for (const m of matches) {
+    const url = m[1]
+    if (!url.startsWith('http')) continue
+    if (seen.has(url)) continue
+    seen.add(url)
+    results.push(url)
+    if (results.length >= 200) break // generous safety cap, not a realistic limit
+  }
+  return results
 }
 
 function decodeHtmlEntities(str: string): string {
@@ -73,11 +83,6 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&quot;/g, '"')
 }
 
-// Extracts every link along with a usable label. Many email CTAs are images with
-// no visible text (a logo, a product photo wrapped in a link) — if there's no
-// text content, fall back to the image's alt attribute, and only as a last
-// resort use a generic label. Never silently drop a link just because it has
-// no visible text, since that was hiding image-based CTAs from the report entirely.
 function extractCtasFromHtml(html: string): { label: string; url: string }[] {
   const stripped = stripHiddenDivs(html)
   const matches = [...stripped.matchAll(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)]
@@ -98,7 +103,6 @@ function extractCtasFromHtml(html: string): { label: string; url: string }[] {
       .trim()
     label = decodeHtmlEntities(label)
 
-    // No visible text — fall back to the alt text of an image inside the link
     if (!label || label.length < 2) {
       const altMatch = inner.match(/<img[^>]*\balt=["']([^"']*)["'][^>]*>/i)
       if (altMatch && altMatch[1].trim().length > 1) {
@@ -106,7 +110,6 @@ function extractCtasFromHtml(html: string): { label: string; url: string }[] {
       }
     }
 
-    // Still nothing — include it anyway rather than silently dropping the link
     if (!label || label.length < 2) {
       label = 'Image link'
     }
@@ -169,13 +172,46 @@ async function resolveAllCtas(
   )
 }
 
-function extractAltTexts(html: string): { missing: number; total: number } {
-  const imgs = [...html.matchAll(/<img[^>]*>/gi)]
-  const total = imgs.length
-  const missing = imgs.filter(m =>
-    !m[0].includes('alt=') || m[0].match(/alt=["']\s*["']/)
-  ).length
-  return { missing, total }
+// Detects likely open-tracking pixels — invisible 1x1 images used purely to log opens,
+// never seen by a real reader. Flagging these for "missing alt text" is a false positive:
+// they're not user-facing content, so excluding them keeps the accessibility check meaningful.
+function isTrackingPixel(imgTag: string): boolean {
+  const widthMatch = imgTag.match(/\bwidth=["']?(\d+)/i)
+  const heightMatch = imgTag.match(/\bheight=["']?(\d+)/i)
+  const width = widthMatch ? parseInt(widthMatch[1]) : null
+  const height = heightMatch ? parseInt(heightMatch[1]) : null
+
+  if (width !== null && height !== null && width <= 1 && height <= 1) return true
+
+  const srcMatch = imgTag.match(/\bsrc=["']([^"']+)["']/i)
+  const src = srcMatch ? srcMatch[1].toLowerCase() : ''
+  const trackingPatterns = ['/wf/open', '/o/', '/open?', 'pixel.gif', 'pixel.png', '/track/open', 'beacon']
+  if (trackingPatterns.some(p => src.includes(p))) return true
+
+  return false
+}
+
+// Returns total real (non-tracking-pixel) images and how many are missing alt text entirely.
+// IMPORTANT: alt="" (an explicitly empty alt attribute) is the correct, deliberate way to mark
+// an image as decorative — it tells screen readers to skip it. It is NOT an error and must never
+// be counted as "missing". Only images with no alt attribute at all count as missing.
+function extractAltTexts(html: string): { missing: number; total: number; missingSrcs: string[] } {
+  const allImgs = [...html.matchAll(/<img[^>]*>/gi)].map(m => m[0])
+  const realImgs = allImgs.filter(tag => !isTrackingPixel(tag))
+
+  const total = realImgs.length
+  const missingTags = realImgs.filter(tag => !tag.includes('alt='))
+  const missing = missingTags.length
+
+  const missingSrcs = missingTags.slice(0, 3).map(tag => {
+    const srcMatch = tag.match(/\bsrc=["']([^"']+)["']/i)
+    if (!srcMatch) return '(unknown image)'
+    const src = srcMatch[1]
+    const filename = src.split('/').pop()?.split('?')[0] || src
+    return filename.length > 40 ? filename.substring(0, 37) + '...' : filename
+  })
+
+  return { missing, total, missingSrcs }
 }
 
 function checkMergeTags(html: string, plain: string): string[] {
@@ -296,10 +332,10 @@ export async function runQA(email: {
       : `WARNING: ${utmCheck.missing} of ${utmCheck.total} links are missing UTM parameters`,
 
     altTexts.total === 0
-      ? 'INFO: No images found in email'
+      ? 'INFO: No content images found in email (tracking pixels excluded)'
       : altTexts.missing > 0
-      ? `WARNING: ${altTexts.missing} of ${altTexts.total} images are missing alt text`
-      : `PASS: All ${altTexts.total} images have alt text`,
+      ? `WARNING: ${altTexts.missing} of ${altTexts.total} content images are missing alt text entirely. Specifically: ${altTexts.missingSrcs.join(', ')}. Note: images with alt="" (empty) are correctly marked decorative and are not counted as missing.`
+      : `PASS: All ${altTexts.total} content images have alt attributes (tracking pixels excluded; alt="" on decorative images is correct and counted as present)`,
 
     decodedPlain.length > 50
       ? 'PASS: Plain text version present'
@@ -338,7 +374,7 @@ export async function runQA(email: {
     safePreheader ? `Preview text: "${safePreheader}"` : 'Preview text: NOT DETECTED',
     `Plain text: ${decodedPlain.length > 50 ? 'present' : 'missing'}`,
     `HTML links: ${htmlLinks.length}`,
-    `Images: ${altTexts.total} total, ${altTexts.missing} missing alt text`,
+    `Content images: ${altTexts.total} total (tracking pixels excluded), ${altTexts.missing} missing alt text`,
     '',
     'PRE-CHECKED FINDINGS — these are facts, do not contradict:',
     ...deterministicChecks,
@@ -358,6 +394,7 @@ RULES:
 - Duplicated consecutive words have ALREADY been checked deterministically (see PRE-CHECKED FINDINGS) — do not re-check for this yourself, just reflect the given finding in the Content & copy section
 - Repeated content blocks (desktop vs mobile copy) have ALREADY been consolidated before you received this text — never flag "duplicate content" or "repeated paragraph" as an issue, since what you're reading is already deduplicated
 - The email text content is truncated for processing purposes only — never flag this as a rendering or content-cutoff issue
+- Alt text findings have ALREADY been checked deterministically, with tracking pixels excluded and alt="" correctly treated as valid (decorative) — reflect the given finding exactly rather than re-checking images yourself
 - Use single quotes only in all text fields — never double quotes inside strings
 - Keep all issue text under 100 characters
 

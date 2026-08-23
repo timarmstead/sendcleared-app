@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Image from 'next/image'
 
 type Approval = {
   status: string
@@ -137,7 +138,14 @@ export default function ApprovalPage() {
         alignItems: 'center',
         justifyContent: 'center',
       }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: '17px' }}>SendCleared</span>
+        <Image
+          src="/sendcleared-logo.png"
+          alt="SendCleared"
+          width={140}
+          height={29}
+          priority
+          style={{ height: '29px', width: 'auto' }}
+        />
       </div>
     )
   }

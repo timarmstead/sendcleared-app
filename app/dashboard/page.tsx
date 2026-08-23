@@ -367,4 +367,49 @@ export default function Dashboard() {
                   <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117', marginBottom: '2px' }}>
                     {client.name}
                   </p>
-                  <p style={{ fontSize: '12px', color: '#f26600', fontFamily: 'monospace' }}></p>
+                  <p style={{ fontSize: '12px', color: '#f26600', fontFamily: 'monospace' }}>
+                    {client.inbox_address}
+                  </p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                  <button
+                    onClick={() => router.push(`/dashboard/client/${client.id}`)}
+                    style={{
+                      background: '#134e8e',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Reports
+                  </button>
+                  <button
+                    onClick={() => archiveClient(client.id, client.name)}
+                    disabled={archivingId === client.id}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#9a9891',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      cursor: archivingId === client.id ? 'default' : 'pointer',
+                      whiteSpace: 'nowrap',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    {archivingId === client.id ? 'Archiving…' : 'Archive client'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

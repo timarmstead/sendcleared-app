@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -33,9 +34,14 @@ export default function DashboardHeader({ showBack = false }: { showBack?: boole
       gap: '1.5rem',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: '17px', whiteSpace: 'nowrap' }}>
-          SendCleared
-        </span>
+        <Image
+          src="/sendcleared-logo.png"
+          alt="SendCleared"
+          width={140}
+          height={29}
+          priority
+          style={{ height: '29px', width: 'auto' }}
+        />
         <nav style={{ display: 'flex', gap: '1.25rem' }}>
           <a href="/dashboard" style={linkStyle(pathname === '/dashboard')}>Dashboard</a>
           <a href="/dashboard/account" style={linkStyle(pathname === '/dashboard/account')}>Account</a>

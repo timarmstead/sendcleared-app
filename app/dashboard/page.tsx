@@ -179,7 +179,7 @@ export default function Dashboard() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
                   <p style={{ fontSize: '15px', fontWeight: 700 }}>Add a client &amp; send your test email</p>
-                  <span style={{ color: '#134e8e', opacity: 0.6, flexShrink: 0 }}>✉</span>
+                  <span style={{ color: '#134e8e', opacity: 0.6, flexShrink: 0, fontSize: '20px' }}>✉</span>
                 </div>
                 <p style={{ fontSize: '13px', color: '#5a5a56', lineHeight: 1.5, marginBottom: '.75rem', maxWidth: '480px' }}>
                   Add your client below to generate their unique inbox address, then send a test from Klaviyo, Omnisend, or any ESP.
@@ -201,7 +201,7 @@ export default function Dashboard() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
                   <p style={{ fontSize: '15px', fontWeight: 700 }}>Find your QA report under Reports</p>
-                  <span style={{ color: '#134e8e', opacity: 0.6, flexShrink: 0 }}>📄</span>
+                  <span style={{ color: '#134e8e', opacity: 0.6, flexShrink: 0, fontSize: '20px' }}>📄</span>
                 </div>
                 <p style={{ fontSize: '13px', color: '#5a5a56', lineHeight: 1.5, marginBottom: '.75rem', maxWidth: '480px' }}>
                   Click "Reports" next to your client below — 14 automated checks run in about 10 seconds.
@@ -227,7 +227,7 @@ export default function Dashboard() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
                   <p style={{ fontSize: '15px', fontWeight: 700 }}>Fix &amp; re-run</p>
-                  <span style={{ color: '#134e8e', opacity: 0.6, flexShrink: 0 }}>↻</span>
+                  <span style={{ color: '#134e8e', opacity: 0.6, flexShrink: 0, fontSize: '20px' }}>↻</span>
                 </div>
                 <p style={{ fontSize: '13px', color: '#5a5a56', lineHeight: 1.5, marginBottom: '.75rem', maxWidth: '480px' }}>
                   Fix the flagged issues inside your ESP, then send another test.
@@ -248,7 +248,7 @@ export default function Dashboard() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
                   <p style={{ fontSize: '15px', fontWeight: 700 }}>Get client approval</p>
-                  <span style={{ color: '#134e8e', opacity: 0.6, flexShrink: 0 }}>∞</span>
+                  <span style={{ color: '#134e8e', opacity: 0.6, flexShrink: 0, fontSize: '20px' }}>∞</span>
                 </div>
                 <p style={{ fontSize: '13px', color: '#5a5a56', lineHeight: 1.5, marginBottom: '.75rem', maxWidth: '480px' }}>
                   Create a unique approval link and send it straight to your client.

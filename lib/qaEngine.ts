@@ -55,24 +55,6 @@ function truncateAtWordBoundary(text: string, maxLength: number): string {
   return lastSpace > 0 ? slice.substring(0, lastSpace) : slice
 }
 
-// Extracts every unique HTTP(S) link in the email. No artificial cap — a previous
-// hardcoded .slice(0,20) here caused the "N links found" summary count to disagree
-// with the full "View all CTAs and links" list, which had no such cap.
-function extractLinksFromHtml(html: string): string[] {
-  const matches = [...html.matchAll(/href=["']([^"']+)["']/gi)]
-  const seen = new Set<string>()
-  const results: string[] = []
-  for (const m of matches) {
-    const url = m[1]
-    if (!url.startsWith('http')) continue
-    if (seen.has(url)) continue
-    seen.add(url)
-    results.push(url)
-    if (results.length >= 200) break // generous safety cap, not a realistic limit
-  }
-  return results
-}
-
 function decodeHtmlEntities(str: string): string {
   return str
     .replace(/&nbsp;/g, ' ')
@@ -83,6 +65,10 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&quot;/g, '"')
 }
 
+// SINGLE source of truth for every link in the email. Both the "N links found"
+// summary count AND the "View all CTAs and links" dropdown are derived from this
+// exact same list, so they can never disagree again — previously they used two
+// separate regex passes that caught slightly different things.
 function extractCtasFromHtml(html: string): { label: string; url: string }[] {
   const stripped = stripHiddenDivs(html)
   const matches = [...stripped.matchAll(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)]
@@ -119,7 +105,7 @@ function extractCtasFromHtml(html: string): { label: string; url: string }[] {
     seen.add(url)
     results.push({ label, url })
 
-    if (results.length >= 30) break
+    if (results.length >= 100) break // generous cap, not a realistic limit for a marketing email
   }
 
   return results
@@ -172,9 +158,6 @@ async function resolveAllCtas(
   )
 }
 
-// Detects likely open-tracking pixels — invisible 1x1 images used purely to log opens,
-// never seen by a real reader. Flagging these for "missing alt text" is a false positive:
-// they're not user-facing content, so excluding them keeps the accessibility check meaningful.
 function isTrackingPixel(imgTag: string): boolean {
   const widthMatch = imgTag.match(/\bwidth=["']?(\d+)/i)
   const heightMatch = imgTag.match(/\bheight=["']?(\d+)/i)
@@ -191,10 +174,6 @@ function isTrackingPixel(imgTag: string): boolean {
   return false
 }
 
-// Returns total real (non-tracking-pixel) images and how many are missing alt text entirely.
-// IMPORTANT: alt="" (an explicitly empty alt attribute) is the correct, deliberate way to mark
-// an image as decorative — it tells screen readers to skip it. It is NOT an error and must never
-// be counted as "missing". Only images with no alt attribute at all count as missing.
 function extractAltTexts(html: string): { missing: number; total: number; missingSrcs: string[] } {
   const allImgs = [...html.matchAll(/<img[^>]*>/gi)].map(m => m[0])
   const realImgs = allImgs.filter(tag => !isTrackingPixel(tag))
@@ -296,14 +275,15 @@ export async function runQA(email: {
   const decodedHtml = decodeQP(email.html)
   const decodedPlain = decodeQP(email.plainText)
 
-  const htmlLinks = extractLinksFromHtml(decodedHtml)
+  // Single extraction pass — used for BOTH the summary count and the CTAs dropdown
+  const rawCtas = extractCtasFromHtml(decodedHtml)
+  const htmlLinks = rawCtas.map(c => c.url)
+  const ctas = await resolveAllCtas(rawCtas)
+
   const rawTextContent = extractTextFromHtml(decodedHtml)
   const altTexts = extractAltTexts(decodedHtml)
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(htmlLinks)
-
-  const rawCtas = extractCtasFromHtml(decodedHtml)
-  const ctas = await resolveAllCtas(rawCtas)
 
   const duplicateWords = detectDuplicateWords(rawTextContent)
 

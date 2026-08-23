@@ -314,23 +314,7 @@ export default function ApprovalPage() {
           )}
         </div>
 
-        {/* QA summary — always visible */}
-        {report && (
-          <div style={{
-            background: '#fff',
-            borderLeft: '3px solid #5a9020',
-            borderRadius: '0 8px 8px 0',
-            padding: '12px 16px',
-            marginBottom: '8px',
-            fontSize: '14px',
-            color: '#0f1117',
-            lineHeight: 1.6,
-          }}>
-            {report.summary}
-          </div>
-        )}
-
-        {/* Full technical breakdown — collapsed by default */}
+        {/* Full technical breakdown — collapsed by default, includes summary + section details */}
         {report && (
           <details style={{
             background: '#fff',
@@ -349,6 +333,18 @@ export default function ApprovalPage() {
               View full QA details
             </summary>
             <div style={{ marginTop: '12px' }}>
+              <div style={{
+                background: '#f7f7f5',
+                borderLeft: '3px solid #5a9020',
+                borderRadius: '0 8px 8px 0',
+                padding: '12px 16px',
+                marginBottom: '8px',
+                fontSize: '14px',
+                color: '#0f1117',
+                lineHeight: 1.6,
+              }}>
+                {report.summary}
+              </div>
               {report.sections?.map((section, i) => (
                 <div key={i} style={{ ...cardStyle, padding: '1rem 1.25rem', border: '1px solid rgba(0,0,0,0.06)' }}>
                   <div style={{

@@ -399,12 +399,29 @@ export default function ApprovalPage() {
           <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117', marginBottom: '10px' }}>
             Email preview
           </p>
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-            <button onClick={() => setView('desktop')} style={toggleBtnStyle(view === 'desktop')}>
-              Desktop
-            </button>
-            <button onClick={() => setView('mobile')} style={toggleBtnStyle(view === 'mobile')}>
-              Mobile
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button onClick={() => setView('desktop')} style={toggleBtnStyle(view === 'desktop')}>
+                Desktop
+              </button>
+              <button onClick={() => setView('mobile')} style={toggleBtnStyle(view === 'mobile')}>
+                Mobile
+              </button>
+            </div>
+            <button
+              onClick={() => window.open(`/api/public-approval/${token}/preview`, '_blank')}
+              style={{
+                padding: '5px 12px',
+                fontSize: '12px',
+                fontWeight: 500,
+                borderRadius: '20px',
+                border: '1px solid rgba(0,0,0,0.14)',
+                background: '#f0efe9',
+                color: '#134e8e',
+                cursor: 'pointer',
+              }}
+            >
+              View full-size ↗
             </button>
           </div>
           <div style={{

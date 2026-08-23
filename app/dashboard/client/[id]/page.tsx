@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import DashboardHeader from '@/components/DashboardHeader'
 
 type Campaign = {
   id: string
@@ -74,19 +75,7 @@ export default function ClientDetail() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f7f7f5', fontFamily: '-apple-system, sans-serif' }}>
-      <div style={{
-        background: '#f26600',
-        padding: '0 2rem',
-        height: '64px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: '17px' }}>SendCleared</span>
-        <a href="/dashboard" style={{ color: 'rgba(255,255,255,0.8)', fontSize: '13px', textDecoration: 'none' }}>
-          ← Back to clients
-        </a>
-      </div>
+      <DashboardHeader showBack />
 
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '2.5rem 2rem' }}>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#134e8e', marginBottom: '.5rem' }}>
@@ -163,21 +152,42 @@ export default function ClientDetail() {
             {campaigns.map((campaign) => (
               <div
                 key={campaign.id}
-                onClick={() => router.push(`/dashboard/report/${campaign.id}`)}
                 style={{
                   background: '#fff',
                   padding: '1rem 1.25rem',
                   borderRadius: '10px',
                   border: '1px solid rgba(0,0,0,0.09)',
-                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
                 }}
               >
-                <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117', marginBottom: '2px' }}>
-                  {campaign.subject || '(no subject)'}
-                </p>
-                <p style={{ fontSize: '12px', color: '#9a9891' }}>
-                  {new Date(campaign.received_at).toLocaleString()}
-                </p>
+                <div>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117', marginBottom: '2px' }}>
+                    {campaign.subject || '(no subject)'}
+                  </p>
+                  <p style={{ fontSize: '12px', color: '#9a9891' }}>
+                    {new Date(campaign.received_at).toLocaleString()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => router.push(`/dashboard/report/${campaign.id}`)}
+                  style={{
+                    background: '#134e8e',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                  }}
+                >
+                  View report
+                </button>
               </div>
             ))}
           </div>

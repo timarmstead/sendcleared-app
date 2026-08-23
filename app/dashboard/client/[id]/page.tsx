@@ -18,9 +18,16 @@ type ClientData = {
   inbox_address: string
 }
 
+type ApprovalStatus = {
+  status: string
+  approver_name: string | null
+  changes_requested: string | null
+}
+
 export default function ClientDetail() {
   const [client, setClient] = useState<ClientData | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [approvalMap, setApprovalMap] = useState<Record<string, ApprovalStatus>>({})
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
   const router = useRouter()
@@ -52,7 +59,33 @@ export default function ClientDetail() {
       .eq('client_id', clientId)
       .order('received_at', { ascending: false })
 
-    if (campaignData) setCampaigns(campaignData)
+    if (campaignData) {
+      setCampaigns(campaignData)
+
+      const campaignIds = campaignData.map(c => c.id)
+      if (campaignIds.length > 0) {
+        const { data: approvalsData } = await supabase
+          .from('approvals')
+          .select('campaign_id, status, approver_name, changes_requested, created_at')
+          .in('campaign_id', campaignIds)
+          .order('created_at', { ascending: false })
+
+        if (approvalsData) {
+          const map: Record<string, ApprovalStatus> = {}
+          for (const a of approvalsData) {
+            // Keep only the most recent approval per campaign (results already sorted desc)
+            if (!map[a.campaign_id]) {
+              map[a.campaign_id] = {
+                status: a.status,
+                approver_name: a.approver_name,
+                changes_requested: a.changes_requested,
+              }
+            }
+          }
+          setApprovalMap(map)
+        }
+      }
+    }
 
     setLoading(false)
   }
@@ -62,6 +95,31 @@ export default function ClientDetail() {
       navigator.clipboard.writeText(client.inbox_address)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  function getStatusBadge(campaignId: string) {
+    const approval = approvalMap[campaignId]
+    if (!approval) return null
+
+    if (approval.status === 'approved') {
+      return {
+        label: `✓ Approved${approval.approver_name ? ` by ${approval.approver_name}` : ''}`,
+        background: '#eaf3de',
+        color: '#27500a',
+      }
+    }
+    if (approval.status === 'changes_requested') {
+      return {
+        label: '↩ Changes requested',
+        background: '#faeeda',
+        color: '#5c3308',
+      }
+    }
+    return {
+      label: 'Pending approval',
+      background: '#e3eff9',
+      color: '#0c3d6e',
     }
   }
 
@@ -149,47 +207,80 @@ export default function ClientDetail() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {campaigns.map((campaign) => (
-              <div
-                key={campaign.id}
-                style={{
-                  background: '#fff',
-                  padding: '1rem 1.25rem',
-                  borderRadius: '10px',
-                  border: '1px solid rgba(0,0,0,0.09)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                }}
-              >
-                <div>
-                  <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117', marginBottom: '2px' }}>
-                    {campaign.subject || '(no subject)'}
-                  </p>
-                  <p style={{ fontSize: '12px', color: '#9a9891' }}>
-                    {new Date(campaign.received_at).toLocaleString()}
-                  </p>
-                </div>
-                <button
-                  onClick={() => router.push(`/dashboard/report/${campaign.id}`)}
+            {campaigns.map((campaign) => {
+              const badge = getStatusBadge(campaign.id)
+              const approval = approvalMap[campaign.id]
+              return (
+                <div
+                  key={campaign.id}
                   style={{
-                    background: '#134e8e',
-                    color: '#fff',
-                    border: 'none',
-                    padding: '8px 16px',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
+                    background: '#fff',
+                    padding: '1rem 1.25rem',
+                    borderRadius: '10px',
+                    border: '1px solid rgba(0,0,0,0.09)',
                   }}
                 >
-                  View report
-                </button>
-              </div>
-            ))}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                  }}>
+                    <div>
+                      <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117', marginBottom: '2px' }}>
+                        {campaign.subject || '(no subject)'}
+                      </p>
+                      <p style={{ fontSize: '12px', color: '#9a9891' }}>
+                        {new Date(campaign.received_at).toLocaleString()}
+                      </p>
+                      {badge && (
+                        <span style={{
+                          display: 'inline-block',
+                          marginTop: '6px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          padding: '2px 9px',
+                          borderRadius: '20px',
+                          background: badge.background,
+                          color: badge.color,
+                        }}>
+                          {badge.label}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => router.push(`/dashboard/report/${campaign.id}`)}
+                      style={{
+                        background: '#134e8e',
+                        color: '#fff',
+                        border: 'none',
+                        padding: '8px 16px',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      View report
+                    </button>
+                  </div>
+                  {approval?.status === 'changes_requested' && approval.changes_requested && (
+                    <p style={{
+                      fontSize: '12px',
+                      color: '#5c3308',
+                      marginTop: '8px',
+                      background: '#faeeda',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                    }}>
+                      "{approval.changes_requested}"
+                    </p>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

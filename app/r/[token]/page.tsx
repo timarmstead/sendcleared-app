@@ -314,84 +314,104 @@ export default function ApprovalPage() {
           )}
         </div>
 
-        {/* QA summary */}
+        {/* QA summary — always visible */}
         {report && (
-          <>
-            <div style={{
-              background: '#fff',
-              borderLeft: '3px solid #5a9020',
-              borderRadius: '0 8px 8px 0',
-              padding: '12px 16px',
-              marginBottom: '12px',
-              fontSize: '14px',
-              color: '#0f1117',
-              lineHeight: 1.6,
-            }}>
-              {report.summary}
-            </div>
+          <div style={{
+            background: '#fff',
+            borderLeft: '3px solid #5a9020',
+            borderRadius: '0 8px 8px 0',
+            padding: '12px 16px',
+            marginBottom: '8px',
+            fontSize: '14px',
+            color: '#0f1117',
+            lineHeight: 1.6,
+          }}>
+            {report.summary}
+          </div>
+        )}
 
-            {report.sections?.map((section, i) => (
-              <div key={i} style={{ ...cardStyle, padding: '1rem 1.25rem' }}>
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '6px',
-                }}>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117' }}>
-                    {section.name}
-                  </span>
-                  <span style={{ fontSize: '12px', color: '#9a9891' }}>
-                    {section.score}/100
-                  </span>
-                </div>
-                <div style={{
-                  height: '3px',
-                  background: '#f0efe9',
-                  borderRadius: '2px',
-                  overflow: 'hidden',
-                  marginBottom: '10px',
-                }}>
+        {/* Full technical breakdown — collapsed by default */}
+        {report && (
+          <details style={{
+            background: '#fff',
+            borderRadius: '10px',
+            border: '1px solid rgba(0,0,0,0.09)',
+            padding: '0.75rem 1.25rem',
+            marginBottom: '8px',
+          }}>
+            <summary style={{
+              fontSize: '14px',
+              fontWeight: 600,
+              color: '#0f1117',
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}>
+              View full QA details
+            </summary>
+            <div style={{ marginTop: '12px' }}>
+              {report.sections?.map((section, i) => (
+                <div key={i} style={{ ...cardStyle, padding: '1rem 1.25rem', border: '1px solid rgba(0,0,0,0.06)' }}>
                   <div style={{
-                    width: `${section.score}%`,
-                    height: '100%',
-                    background: getScoreColor(section.score),
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '6px',
+                  }}>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: '#0f1117' }}>
+                      {section.name}
+                    </span>
+                    <span style={{ fontSize: '12px', color: '#9a9891' }}>
+                      {section.score}/100
+                    </span>
+                  </div>
+                  <div style={{
+                    height: '3px',
+                    background: '#f0efe9',
                     borderRadius: '2px',
-                  }} />
-                </div>
-                {section.issues?.map((issue, j) => {
-                  const badge = getBadgeStyle(issue.severity)
-                  return (
-                    <div key={j} style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '8px',
-                      padding: '7px 0',
-                      borderBottom: j < section.issues.length - 1 ? '0.5px solid rgba(0,0,0,0.07)' : 'none',
-                      fontSize: '13px',
-                      color: '#0f1117',
-                      lineHeight: 1.45,
-                    }}>
-                      <span style={{
-                        background: badge.background,
-                        color: badge.color,
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        padding: '2px 7px',
-                        borderRadius: '4px',
-                        whiteSpace: 'nowrap',
-                        flexShrink: 0,
-                        marginTop: '1px',
+                    overflow: 'hidden',
+                    marginBottom: '10px',
+                  }}>
+                    <div style={{
+                      width: `${section.score}%`,
+                      height: '100%',
+                      background: getScoreColor(section.score),
+                      borderRadius: '2px',
+                    }} />
+                  </div>
+                  {section.issues?.map((issue, j) => {
+                    const badge = getBadgeStyle(issue.severity)
+                    return (
+                      <div key={j} style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '8px',
+                        padding: '7px 0',
+                        borderBottom: j < section.issues.length - 1 ? '0.5px solid rgba(0,0,0,0.07)' : 'none',
+                        fontSize: '13px',
+                        color: '#0f1117',
+                        lineHeight: 1.45,
                       }}>
-                        {badge.label}
-                      </span>
-                      <span>{issue.text}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            ))}
-          </>
+                        <span style={{
+                          background: badge.background,
+                          color: badge.color,
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '2px 7px',
+                          borderRadius: '4px',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                          marginTop: '1px',
+                        }}>
+                          {badge.label}
+                        </span>
+                        <span>{issue.text}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          </details>
         )}
 
         {/* Email preview */}

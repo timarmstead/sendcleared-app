@@ -10,14 +10,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
-  const { data: prefs } = await supabase
-    .from('user_preferences')
-    .select('welcome_email_sent')
-    .eq('user_id', user.id)
-    .maybeSingle()
+  // Atomically "claim" the right to send this email, so two near-simultaneous
+  // requests (e.g. React re-running page-load logic) can never both send it.
+  // Only one of two concurrent requests can win this UPDATE, thanks to
+  // Postgres row-level locking during the write.
+  let claimed = false
 
-  // Already sent — nothing to do, this route is safe to call repeatedly
-  if (prefs?.welcome_email_sent) {
+  const { data: updated } = await supabase
+    .from('user_preferences')
+    .update({ welcome_email_sent: true, updated_at: new Date().toISOString() })
+    .eq('user_id', user.id)
+    .eq('welcome_email_sent', false)
+    .select()
+
+  if (updated && updated.length > 0) {
+    claimed = true
+  } else {
+    // No existing row matched (either no row yet, or already sent).
+    // Try to INSERT — this only succeeds if no row exists at all, since
+    // user_id is the primary key. If a concurrent request already inserted
+    // it, this fails with a conflict and we correctly do NOT send again.
+    const { error: insertErr } = await supabase
+      .from('user_preferences')
+      .insert({ user_id: user.id, welcome_email_sent: true })
+
+    if (!insertErr) {
+      claimed = true
+    }
+  }
+
+  if (!claimed) {
     return NextResponse.json({ sent: false, reason: 'already_sent' })
   }
 
@@ -47,14 +69,12 @@ export async function POST(request: NextRequest) {
       `,
     })
 
-    await supabase
-      .from('user_preferences')
-      .upsert({ user_id: user.id, welcome_email_sent: true, updated_at: new Date().toISOString() })
-
     return NextResponse.json({ sent: true })
   } catch (err) {
     console.error('Failed to send welcome email:', err)
-    // Don't fail the request over a non-critical email — just log it
+    // The claim already succeeded, so welcome_email_sent stays true even
+    // if the send itself failed — we don't want to retry indefinitely on
+    // a persistently-failing address. Logged for visibility instead.
     return NextResponse.json({ sent: false, reason: 'send_failed' })
   }
 }

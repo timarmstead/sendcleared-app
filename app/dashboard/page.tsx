@@ -44,6 +44,10 @@ export default function Dashboard() {
 
     if (prefData) setGuideHidden(prefData.guide_hidden)
 
+    // Fire-and-forget — safe to call every load, the route itself checks
+    // whether the welcome email has already been sent and no-ops if so
+    fetch('/api/welcome-email', { method: 'POST' }).catch(() => {})
+
     const { data, error } = await supabase
       .from('clients')
       .select('*')

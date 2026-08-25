@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -10,7 +10,34 @@ export default function ResetPassword() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [sessionReady, setSessionReady] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(true)
   const router = useRouter()
+
+  useEffect(() => {
+    checkSession()
+
+    // Supabase needs a moment to convert the magic-link URL into an actual
+    // session — listen for that, in case it finishes after our initial check.
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        setSessionReady(true)
+        setCheckingSession(false)
+      }
+    })
+
+    return () => {
+      listener.subscription.unsubscribe()
+    }
+  }, [])
+
+  async function checkSession() {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) {
+      setSessionReady(true)
+    }
+    setCheckingSession(false)
+  }
 
   async function handleReset(e: React.FormEvent) {
     e.preventDefault()
@@ -74,7 +101,13 @@ export default function ResetPassword() {
           Set a new password
         </h1>
 
-        {success ? (
+        {checkingSession ? (
+          <p style={{ fontSize: '14px', color: '#9a9891' }}>Verifying your link...</p>
+        ) : !sessionReady ? (
+          <p style={{ fontSize: '14px', color: '#791f1f', lineHeight: 1.5 }}>
+            This link appears to be invalid or has expired. Please request a new one and try again.
+          </p>
+        ) : success ? (
           <p style={{ fontSize: '14px', color: '#27500a', lineHeight: 1.5 }}>
             ✓ Password updated. Redirecting you to your dashboard...
           </p>

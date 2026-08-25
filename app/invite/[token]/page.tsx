@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -14,15 +14,41 @@ export default function InvitePage() {
   const [accepting, setAccepting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const attemptedRef = useRef(false)
 
   useEffect(() => {
+    // Check immediately on load...
     checkAuth()
+
+    // ...and ALSO listen for the session to become available afterward.
+    // Right after an email-confirmation redirect, Supabase's client needs a
+    // moment to process the login from the URL — a one-time check on mount
+    // can catch that split-second window where it still looks logged out.
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setLoggedIn(true)
+        setLoading(false)
+        if (!attemptedRef.current) {
+          attemptedRef.current = true
+          acceptInvite()
+        }
+      }
+    })
+
+    return () => {
+      listener.subscription.unsubscribe()
+    }
   }, [])
 
   async function checkAuth() {
     const { data: { user } } = await supabase.auth.getUser()
     setLoggedIn(!!user)
     setLoading(false)
+
+    if (user && !attemptedRef.current) {
+      attemptedRef.current = true
+      acceptInvite()
+    }
   }
 
   async function acceptInvite() {
@@ -40,6 +66,7 @@ export default function InvitePage() {
       setTimeout(() => router.push('/dashboard'), 1500)
     } catch (err: any) {
       setError(err.message)
+      attemptedRef.current = false // allow retry via the manual button
     } finally {
       setAccepting(false)
     }
@@ -94,10 +121,10 @@ export default function InvitePage() {
             You've been invited to SendCleared
           </h1>
           <p style={{ fontSize: '14px', color: '#5a5a56', marginBottom: '1.5rem', lineHeight: 1.5 }}>
-            Log in or sign up with the email address this invite was sent to, then come back to this link to join the team.
+            Log in or sign up with the email address this invite was sent to. You'll be added to the team automatically.
           </p>
           <button
-            onClick={() => router.push('/login')}
+            onClick={() => router.push(`/login?invite=${token}`)}
             style={{
               width: '100%', padding: '12px', borderRadius: '8px', border: 'none',
               background: '#f26600', color: '#fff', fontWeight: 600, fontSize: '14px',
@@ -107,7 +134,7 @@ export default function InvitePage() {
             Log in
           </button>
           <button
-            onClick={() => router.push('/signup')}
+            onClick={() => router.push(`/signup?invite=${token}`)}
             style={{
               width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid rgba(0,0,0,0.14)',
               background: 'transparent', color: '#0f1117', fontWeight: 600, fontSize: '14px', cursor: 'pointer',
@@ -124,25 +151,22 @@ export default function InvitePage() {
     <div style={shellStyle}>
       <div style={cardStyle}>
         <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#134e8e', marginBottom: '.75rem' }}>
-          You've been invited to a team
+          {accepting ? 'Joining team...' : 'Accept invite'}
         </h1>
-        <p style={{ fontSize: '14px', color: '#5a5a56', marginBottom: '1.5rem' }}>
-          Click below to join and start collaborating.
-        </p>
         {error && (
           <p style={{ color: '#791f1f', fontSize: '13px', marginBottom: '1rem' }}>{error}</p>
         )}
-        <button
-          onClick={acceptInvite}
-          disabled={accepting}
-          style={{
-            width: '100%', padding: '12px', borderRadius: '8px', border: 'none',
-            background: '#f26600', color: '#fff', fontWeight: 600, fontSize: '14px',
-            cursor: accepting ? 'default' : 'pointer',
-          }}
-        >
-          {accepting ? 'Joining...' : 'Accept invite'}
-        </button>
+        {!accepting && (
+          <button
+            onClick={acceptInvite}
+            style={{
+              width: '100%', padding: '12px', borderRadius: '8px', border: 'none',
+              background: '#f26600', color: '#fff', fontWeight: 600, fontSize: '14px', cursor: 'pointer',
+            }}
+          >
+            Accept invite
+          </button>
+        )}
       </div>
     </div>
   )

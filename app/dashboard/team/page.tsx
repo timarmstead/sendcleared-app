@@ -35,6 +35,8 @@ export default function TeamPage() {
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [inviteSuccess, setInviteSuccess] = useState(false)
   const [revokingId, setRevokingId] = useState<string | null>(null)
+  const [removingUserId, setRemovingUserId] = useState<string | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -47,6 +49,7 @@ export default function TeamPage() {
       router.push('/login')
       return
     }
+    setCurrentUserId(user.id)
 
     setLoadError(null)
     try {
@@ -103,6 +106,21 @@ export default function TeamPage() {
       await loadTeam()
     } finally {
       setRevokingId(null)
+    }
+  }
+
+  async function removeMember(userId: string, email: string) {
+    const confirmed = window.confirm(
+      `Remove ${email} from this team?\n\nThey'll immediately lose access to this team's clients, reports, and billing. Their own login will still work, but they'll need a new invite to rejoin — this is fully reversible any time.`
+    )
+    if (!confirmed) return
+
+    setRemovingUserId(userId)
+    try {
+      await fetch(`/api/team/members/${userId}`, { method: 'DELETE' })
+      await loadTeam()
+    } finally {
+      setRemovingUserId(null)
     }
   }
 
@@ -163,14 +181,29 @@ export default function TeamPage() {
               padding: '10px 0', borderBottom: '1px solid rgba(0,0,0,0.06)',
             }}>
               <span style={{ fontSize: '14px', color: '#0f1117' }}>{m.email}</span>
-              <span style={{
-                fontSize: '11px', fontWeight: 600, padding: '2px 9px', borderRadius: '20px',
-                background: m.role === 'owner' ? '#e3eff9' : '#f0efe9',
-                color: m.role === 'owner' ? '#0c3d6e' : '#5a5a56',
-                textTransform: 'capitalize',
-              }}>
-                {m.role}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                  fontSize: '11px', fontWeight: 600, padding: '2px 9px', borderRadius: '20px',
+                  background: m.role === 'owner' ? '#e3eff9' : '#f0efe9',
+                  color: m.role === 'owner' ? '#0c3d6e' : '#5a5a56',
+                  textTransform: 'capitalize',
+                }}>
+                  {m.role}
+                </span>
+                {role === 'owner' && m.user_id !== currentUserId && (
+                  <button
+                    onClick={() => removeMember(m.user_id, m.email)}
+                    disabled={removingUserId === m.user_id}
+                    style={{
+                      background: 'transparent', border: 'none', color: '#9a9891',
+                      fontSize: '12px', textDecoration: 'underline',
+                      cursor: removingUserId === m.user_id ? 'default' : 'pointer',
+                    }}
+                  >
+                    {removingUserId === m.user_id ? 'Removing...' : 'Remove'}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

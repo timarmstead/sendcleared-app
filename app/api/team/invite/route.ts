@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
   if (!email || !email.trim() || !email.includes('@')) {
     return NextResponse.json({ error: 'A valid email is required' }, { status: 400 })
   }
+  const normalizedEmail = email.trim().toLowerCase()
 
   const { data: membership } = await supabase
     .from('team_members')
@@ -72,7 +73,6 @@ export async function POST(request: NextRequest) {
     const message = plan === 'studio'
       ? `You've reached your ${seatLimit}-seat limit. Contact support if you need more seats.`
       : `Your ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan is limited to ${seatLimit} seat${seatLimit > 1 ? 's' : ''}. Upgrade for more.`
-
     return NextResponse.json({ error: message, limit_reached: true }, { status: 403 })
   }
 
@@ -82,46 +82,71 @@ export async function POST(request: NextRequest) {
     .eq('id', membership.team_id)
     .single()
 
-  const token = generateToken()
-  const expires_at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers()
+  const existingUser = existingUsers?.users.find(
+    (u) => u.email?.toLowerCase() === normalizedEmail
+  )
 
-  const { error: insertError } = await supabaseAdmin
-    .from('team_invites')
-    .insert({
-      team_id: membership.team_id,
-      email: email.trim().toLowerCase(),
-      token,
-      invited_by: user.id,
-      status: 'pending',
-      expires_at,
-    })
+  if (existingUser) {
+    const token = generateToken()
+    const expires_at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
 
-  if (insertError) {
-    return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 })
+    const { error: insertError } = await supabaseAdmin
+      .from('team_invites')
+      .insert({
+        team_id: membership.team_id,
+        email: normalizedEmail,
+        token,
+        invited_by: user.id,
+        status: 'pending',
+        expires_at,
+      })
+
+    if (insertError) {
+      return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 })
+    }
+
+    try {
+      await resend.emails.send({
+        from: 'SendCleared <notifications@sendcleared.com>',
+        to: normalizedEmail,
+        subject: `You've been invited to join ${team?.name || 'a team'} on SendCleared`,
+        html: `
+          <div style="font-family:-apple-system,sans-serif;max-width:520px;margin:0 auto">
+            <h2 style="color:#134e8e">You've been invited to SendCleared</h2>
+            <p>${user.email} has invited you to join their team. Log in with your existing SendCleared account to accept.</p>
+            <a href="${process.env.NEXT_PUBLIC_APP_URL}/invite/${token}"
+               style="display:inline-block;background:#f26600;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin-top:10px">
+              Accept invite
+            </a>
+            <p style="margin-top:24px;font-size:13px;color:#5a5a56">This invite expires in 7 days.</p>
+          </div>
+        `,
+      })
+    } catch (err) {
+      console.error('Failed to send invite email:', err)
+    }
+
+    return NextResponse.json({ success: true, type: 'existing_user' })
   }
 
-  try {
-    await resend.emails.send({
-      from: 'SendCleared <notifications@sendcleared.com>',
-      to: email.trim(),
-      subject: `You've been invited to join ${team?.name || 'a team'} on SendCleared`,
-      html: `
-        <div style="font-family:-apple-system,sans-serif;max-width:520px;margin:0 auto">
-          <h2 style="color:#134e8e">You've been invited to SendCleared</h2>
-          <p>${user.email} has invited you to join their team on SendCleared — an email QA and client approval tool.</p>
-          <a href="${process.env.NEXT_PUBLIC_APP_URL}/invite/${token}"
-             style="display:inline-block;background:#f26600;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin-top:10px">
-            Accept invite
-          </a>
-          <p style="margin-top:24px;font-size:13px;color:#5a5a56">
-            This invite expires in 7 days.
-          </p>
-        </div>
-      `,
-    })
-  } catch (err) {
-    console.error('Failed to send invite email:', err)
+  const { data: inviteData, error: inviteAuthError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+    normalizedEmail,
+    { redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/reset-password` }
+  )
+
+  if (inviteAuthError || !inviteData?.user) {
+    return NextResponse.json({ error: 'Failed to invite this person. Please check the email address.' }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true })
+  const newUserId = inviteData.user.id
+
+  await supabaseAdmin.from('team_members').delete().eq('user_id', newUserId)
+  await supabaseAdmin.from('team_members').insert({
+    team_id: membership.team_id,
+    user_id: newUserId,
+    role: 'member',
+  })
+
+  return NextResponse.json({ success: true, type: 'new_user' })
 }

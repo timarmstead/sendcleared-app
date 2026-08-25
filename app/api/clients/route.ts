@@ -28,10 +28,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Client name is required' }, { status: 400 })
   }
 
+  // Every user belongs to exactly one team (their own personal team, or one they've joined)
+  const { data: membership } = await supabase
+    .from('team_members')
+    .select('team_id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (!membership) {
+    return NextResponse.json({ error: 'No team found for this account' }, { status: 500 })
+  }
+
+  const teamId = membership.team_id
+
   const { data: subscription } = await supabase
     .from('subscriptions')
     .select('plan, status')
-    .eq('user_id', user.id)
+    .eq('team_id', teamId)
     .maybeSingle()
 
   const plan = subscription?.status === 'active' ? subscription.plan : 'free'
@@ -41,7 +54,7 @@ export async function POST(request: NextRequest) {
     const { count } = await supabase
       .from('clients')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
+      .eq('team_id', teamId)
       .is('archived_at', null)
 
     if ((count ?? 0) >= limit) {
@@ -66,7 +79,8 @@ export async function POST(request: NextRequest) {
   const { data: client, error } = await supabase
     .from('clients')
     .insert({
-      user_id: user.id,
+      user_id: user.id, // who created it — kept for reference/audit purposes
+      team_id: teamId,   // actual ownership, used for access and limit checks
       name: name.trim(),
       inbox_address: inboxAddress,
     })

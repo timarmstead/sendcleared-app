@@ -17,14 +17,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
-  const { data: membership } = await supabase
+  const { data: membership, error: membershipError } = await supabase
     .from('team_members')
     .select('team_id, role')
     .eq('user_id', user.id)
     .maybeSingle()
 
   if (!membership) {
-    return NextResponse.json({ error: 'No team found for this account' }, { status: 404 })
+    // TEMPORARY debug info — remove once this is resolved
+    return NextResponse.json({
+      error: 'No team found for this account',
+      debug_user_id: user.id,
+      debug_user_email: user.email,
+      debug_query_error: membershipError?.message || null,
+    }, { status: 404 })
   }
 
   const { data: team } = await supabaseAdmin

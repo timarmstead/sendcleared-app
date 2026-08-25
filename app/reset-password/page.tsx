@@ -15,27 +15,37 @@ export default function ResetPassword() {
   const router = useRouter()
 
   useEffect(() => {
-    checkSession()
-
-    // Supabase needs a moment to convert the magic-link URL into an actual
-    // session — listen for that, in case it finishes after our initial check.
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        setSessionReady(true)
-        setCheckingSession(false)
-      }
-    })
-
-    return () => {
-      listener.subscription.unsubscribe()
-    }
+    establishSession()
   }, [])
 
-  async function checkSession() {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session) {
+  async function establishSession() {
+    const { data: { session: existingSession } } = await supabase.auth.getSession()
+    if (existingSession) {
       setSessionReady(true)
+      setCheckingSession(false)
+      return
     }
+
+    const hash = window.location.hash.startsWith('#')
+      ? window.location.hash.substring(1)
+      : window.location.hash
+
+    const hashParams = new URLSearchParams(hash)
+    const accessToken = hashParams.get('access_token')
+    const refreshToken = hashParams.get('refresh_token')
+
+    if (accessToken && refreshToken) {
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      })
+
+      if (!error) {
+        setSessionReady(true)
+        window.history.replaceState(null, '', window.location.pathname)
+      }
+    }
+
     setCheckingSession(false)
   }
 

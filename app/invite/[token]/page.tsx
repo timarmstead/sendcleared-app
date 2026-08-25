@@ -17,13 +17,8 @@ export default function InvitePage() {
   const attemptedRef = useRef(false)
 
   useEffect(() => {
-    // Check immediately on load...
     checkAuth()
 
-    // ...and ALSO listen for the session to become available afterward.
-    // Right after an email-confirmation redirect, Supabase's client needs a
-    // moment to process the login from the URL — a one-time check on mount
-    // can catch that split-second window where it still looks logged out.
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setLoggedIn(true)
@@ -66,7 +61,7 @@ export default function InvitePage() {
       setTimeout(() => router.push('/dashboard'), 1500)
     } catch (err: any) {
       setError(err.message)
-      attemptedRef.current = false // allow retry via the manual button
+      attemptedRef.current = false
     } finally {
       setAccepting(false)
     }
@@ -121,26 +116,16 @@ export default function InvitePage() {
             You've been invited to SendCleared
           </h1>
           <p style={{ fontSize: '14px', color: '#5a5a56', marginBottom: '1.5rem', lineHeight: 1.5 }}>
-            Log in or sign up with the email address this invite was sent to. You'll be added to the team automatically.
+            Log in with your existing SendCleared account to accept this invite.
           </p>
           <button
             onClick={() => router.push(`/login?invite=${token}`)}
             style={{
               width: '100%', padding: '12px', borderRadius: '8px', border: 'none',
-              background: '#f26600', color: '#fff', fontWeight: 600, fontSize: '14px',
-              cursor: 'pointer', marginBottom: '.75rem',
+              background: '#f26600', color: '#fff', fontWeight: 600, fontSize: '14px', cursor: 'pointer',
             }}
           >
             Log in
-          </button>
-          <button
-            onClick={() => router.push(`/signup?invite=${token}`)}
-            style={{
-              width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid rgba(0,0,0,0.14)',
-              background: 'transparent', color: '#0f1117', fontWeight: 600, fontSize: '14px', cursor: 'pointer',
-            }}
-          >
-            Sign up
           </button>
         </div>
       </div>

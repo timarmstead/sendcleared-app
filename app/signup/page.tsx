@@ -20,8 +20,8 @@ function SignUpForm() {
     setError('')
 
     const redirectTo = inviteToken
-      ? `${window.location.origin}/auth/callback?next=/invite/${inviteToken}`
-      : `${window.location.origin}/auth/callback?next=/dashboard`
+      ? `${window.location.origin}/invite/${inviteToken}`
+      : `${window.location.origin}/dashboard`
 
     const { error } = await supabase.auth.signUp({
       email,

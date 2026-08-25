@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
 export default function Login() {
@@ -10,6 +10,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const inviteToken = searchParams.get('invite')
 
   const [mode, setMode] = useState<'login' | 'forgot'>('login')
   const [resetEmail, setResetEmail] = useState('')
@@ -33,7 +35,7 @@ export default function Login() {
       return
     }
 
-    router.push('/dashboard')
+    router.push(inviteToken ? `/invite/${inviteToken}` : '/dashboard')
   }
 
   async function handleForgotPassword(e: React.FormEvent) {
@@ -42,7 +44,7 @@ export default function Login() {
     setResetError('')
 
     const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
     })
 
     if (error) {
@@ -208,6 +210,15 @@ export default function Login() {
           Log in to SendCleared
         </h1>
 
+        {inviteToken && (
+          <p style={{
+            fontSize: '13px', color: '#0c3d6e', background: '#e3eff9',
+            padding: '10px 12px', borderRadius: '8px', marginBottom: '1.25rem',
+          }}>
+            Log in to accept your team invite.
+          </p>
+        )}
+
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom: '1rem' }}>
             <label style={{ fontSize: '13px', fontWeight: 500, display: 'block', marginBottom: '4px', color: '#0f1117' }}>
@@ -279,7 +290,7 @@ export default function Login() {
         </form>
 
         <p style={{ fontSize: '13px', color: '#5a5a56', marginTop: '1rem', textAlign: 'center' }}>
-          Don't have an account? <a href="/signup" style={{ color: '#f26600' }}>Sign up</a>
+          Don't have an account? <a href={inviteToken ? `/signup?invite=${inviteToken}` : '/signup'} style={{ color: '#f26600' }}>Sign up</a>
         </p>
       </div>
     </div>

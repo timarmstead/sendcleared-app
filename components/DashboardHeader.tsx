@@ -44,6 +44,7 @@ export default function DashboardHeader({ showBack = false }: { showBack?: boole
         />
         <nav style={{ display: 'flex', gap: '1.25rem' }}>
           <a href="/dashboard" style={linkStyle(pathname === '/dashboard')}>Dashboard</a>
+          <a href="/dashboard/team" style={linkStyle(pathname === '/dashboard/team')}>Team</a>
           <a href="/dashboard/account" style={linkStyle(pathname === '/dashboard/account')}>Account</a>
           <a href="/dashboard/billing" style={linkStyle(pathname === '/dashboard/billing')}>Billing</a>
         </nav>

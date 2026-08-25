@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-export default function SignUp() {
+function SignUpForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -179,5 +179,13 @@ export default function SignUp() {
         </p>
       </div>
     </div>
+  )
+}
+
+export default function SignUp() {
+  return (
+    <Suspense fallback={<div style={{ padding: '3rem', fontFamily: '-apple-system, sans-serif' }}>Loading...</div>}>
+      <SignUpForm />
+    </Suspense>
   )
 }

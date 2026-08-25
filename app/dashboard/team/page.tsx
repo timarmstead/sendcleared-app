@@ -23,9 +23,13 @@ type Invite = {
 export default function TeamPage() {
   const [teamName, setTeamName] = useState('')
   const [role, setRole] = useState<'owner' | 'member' | null>(null)
+  const [plan, setPlan] = useState('free')
+  const [seatLimit, setSeatLimit] = useState(1)
+  const [seatsUsed, setSeatsUsed] = useState(0)
   const [members, setMembers] = useState<Member[]>([])
   const [pendingInvites, setPendingInvites] = useState<Invite[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviting, setInviting] = useState(false)
   const [inviteError, setInviteError] = useState<string | null>(null)
@@ -44,15 +48,24 @@ export default function TeamPage() {
       return
     }
 
+    setLoadError(null)
     try {
       const res = await fetch('/api/team')
       const data = await res.json()
-      if (res.ok) {
-        setTeamName(data.team?.name || 'Your team')
-        setRole(data.role)
-        setMembers(data.members || [])
-        setPendingInvites(data.pendingInvites || [])
+      if (!res.ok) {
+        setLoadError(data.error || 'Failed to load team')
+        setLoading(false)
+        return
       }
+      setTeamName(data.team?.name || 'Your team')
+      setRole(data.role)
+      setPlan(data.plan)
+      setSeatLimit(data.seatLimit)
+      setSeatsUsed(data.seatsUsed)
+      setMembers(data.members || [])
+      setPendingInvites(data.pendingInvites || [])
+    } catch (err) {
+      setLoadError('Something went wrong loading your team. Please try refreshing.')
     } finally {
       setLoading(false)
     }
@@ -93,10 +106,29 @@ export default function TeamPage() {
     }
   }
 
+  const seatsRemaining = Math.max(0, seatLimit - seatsUsed)
+  const canInvite = role === 'owner' && seatsRemaining > 0
+
   if (loading) {
     return (
       <div style={{ padding: '3rem', fontFamily: '-apple-system, sans-serif' }}>
         Loading...
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#f7f7f5', fontFamily: '-apple-system, sans-serif' }}>
+        <DashboardHeader />
+        <div style={{ maxWidth: '700px', margin: '0 auto', padding: '2.5rem 2rem' }}>
+          <div style={{
+            background: '#fcebeb', border: '1px solid rgba(0,0,0,0.09)', borderRadius: '12px',
+            padding: '1.5rem', color: '#791f1f', fontSize: '14px',
+          }}>
+            {loadError}
+          </div>
+        </div>
       </div>
     )
   }
@@ -113,10 +145,9 @@ export default function TeamPage() {
         <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#134e8e', marginBottom: '.3rem' }}>
           {teamName}
         </h1>
-        <p style={{ fontSize: '14px', color: '#5a5a56', marginBottom: '2rem' }}>
-          {role === 'owner'
-            ? 'Manage who has access to your clients and reports.'
-            : "You're a member of this team."}
+        <p style={{ fontSize: '14px', color: '#5a5a56', marginBottom: '1.5rem' }}>
+          {plan.charAt(0).toUpperCase() + plan.slice(1)} plan · {seatsUsed} of {seatLimit} seat{seatLimit !== 1 ? 's' : ''} used
+          {seatsRemaining > 0 && ` · ${seatsRemaining} remaining`}
         </p>
 
         <div style={{
@@ -153,29 +184,37 @@ export default function TeamPage() {
               <p style={{ fontSize: '13px', fontWeight: 700, marginBottom: '.75rem' }}>
                 Invite a teammate
               </p>
-              <form onSubmit={sendInvite} style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type="email"
-                  placeholder="colleague@example.com"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  style={{
-                    flex: 1, padding: '10px 12px', borderRadius: '8px',
-                    border: '1px solid rgba(0,0,0,0.14)', fontSize: '14px', color: '#0f1117',
-                  }}
-                />
-                <button
-                  type="submit"
-                  disabled={inviting}
-                  style={{
-                    padding: '10px 20px', borderRadius: '8px', border: 'none',
-                    background: '#f26600', color: '#fff', fontWeight: 600, fontSize: '14px',
-                    cursor: inviting ? 'default' : 'pointer', whiteSpace: 'nowrap',
-                  }}
-                >
-                  {inviting ? 'Sending...' : 'Send invite'}
-                </button>
-              </form>
+              {!canInvite ? (
+                <p style={{ fontSize: '13px', color: '#5a5a56' }}>
+                  {seatsRemaining === 0
+                    ? `You've used all ${seatLimit} seats on your ${plan} plan. Upgrade for more, or remove a member first.`
+                    : 'Invites are only available on paid plans.'}
+                </p>
+              ) : (
+                <form onSubmit={sendInvite} style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="email"
+                    placeholder="colleague@example.com"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    style={{
+                      flex: 1, padding: '10px 12px', borderRadius: '8px',
+                      border: '1px solid rgba(0,0,0,0.14)', fontSize: '14px', color: '#0f1117',
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={inviting}
+                    style={{
+                      padding: '10px 20px', borderRadius: '8px', border: 'none',
+                      background: '#f26600', color: '#fff', fontWeight: 600, fontSize: '14px',
+                      cursor: inviting ? 'default' : 'pointer', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {inviting ? 'Sending...' : 'Send invite'}
+                  </button>
+                </form>
+              )}
               {inviteError && (
                 <p style={{ color: '#791f1f', fontSize: '12px', marginTop: '8px' }}>{inviteError}</p>
               )}

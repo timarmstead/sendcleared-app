@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
+const SEAT_LIMITS: Record<string, number> = {
+  free: 1,
+  freelancer: 1,
+  agency: 3,
+  studio: 10,
+}
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
 
@@ -44,6 +51,15 @@ export async function GET(request: NextRequest) {
     })
   )
 
+  const { data: subscription } = await supabaseAdmin
+    .from('subscriptions')
+    .select('plan, status')
+    .eq('team_id', membership.team_id)
+    .maybeSingle()
+
+  const plan = subscription?.status === 'active' ? subscription.plan : 'free'
+  const seatLimit = SEAT_LIMITS[plan] ?? 1
+
   let pendingInvites: any[] = []
   if (membership.role === 'owner') {
     const { data: invites } = await supabaseAdmin
@@ -55,9 +71,14 @@ export async function GET(request: NextRequest) {
     pendingInvites = invites || []
   }
 
+  const seatsUsed = membersWithEmail.length + pendingInvites.length
+
   return NextResponse.json({
     team,
     role: membership.role,
+    plan,
+    seatLimit,
+    seatsUsed,
     members: membersWithEmail,
     pendingInvites,
   })

@@ -62,8 +62,8 @@ const PLANS = [
       { text: 'Desktop + mobile toggle', included: true },
       { text: 'Remove SendCleared branding', included: true },
       { text: 'White-label approval page', included: true },
-      { text: '3 team seats included', included: true },
       { text: 'Approval audit trail PDF', included: false },
+      { text: '3 team seats included', included: true },
     ],
     note: '14-day free trial included',
     buttonStyle: 'blue' as const,
@@ -96,6 +96,7 @@ export default function BillingPage() {
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [loading, setLoading] = useState(true)
   const [checkingOut, setCheckingOut] = useState<string | null>(null)
+  const [switchMessage, setSwitchMessage] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -122,6 +123,7 @@ export default function BillingPage() {
   async function handleUpgrade(plan: string) {
     if (plan === 'free') return
     setCheckingOut(plan)
+    setSwitchMessage(null)
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',
@@ -129,11 +131,19 @@ export default function BillingPage() {
         body: JSON.stringify({ plan }),
       })
       const data = await res.json()
+
       if (data.url) {
         window.location.href = data.url
+        return
+      }
+
+      if (data.switched) {
+        setSwitchMessage(`✓ Your plan has been updated to ${plan.charAt(0).toUpperCase() + plan.slice(1)}.`)
+        await loadSubscription()
       }
     } catch (err) {
       console.error('Checkout failed:', err)
+    } finally {
       setCheckingOut(null)
     }
   }
@@ -174,7 +184,7 @@ export default function BillingPage() {
         <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#134e8e', marginBottom: '6px' }}>
           Billing
         </h1>
-        <p style={{ fontSize: '14px', color: '#5a5a56', marginBottom: '2rem' }}>
+        <p style={{ fontSize: '14px', color: '#5a5a56', marginBottom: '1rem' }}>
           {currentPlan === 'free'
             ? "You're currently on the free plan."
             : `You're currently on the ${currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)} plan.`}
@@ -183,11 +193,21 @@ export default function BillingPage() {
           )}
         </p>
 
+        {switchMessage && (
+          <div style={{
+            background: '#eaf3de', border: '1px solid #5a9020', borderRadius: '8px',
+            padding: '10px 14px', marginBottom: '1.5rem', fontSize: '13px', color: '#27500a',
+          }}>
+            {switchMessage}
+          </div>
+        )}
+
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
           gap: '1.25rem',
           alignItems: 'start',
+          marginTop: switchMessage ? 0 : '1rem',
         }}>
           {PLANS.map(plan => {
             const isCurrent = currentPlan === plan.id
@@ -280,7 +300,7 @@ export default function BillingPage() {
                   {isCurrent
                     ? '✓ Current plan'
                     : checkingOut === plan.id
-                      ? 'Redirecting…'
+                      ? 'Updating…'
                       : plan.id === 'free'
                         ? 'Downgrade to free'
                         : `Start ${plan.tier} plan`}

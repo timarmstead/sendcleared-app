@@ -23,13 +23,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid plan' }, { status: 400 })
   }
 
-  // Reuse existing Stripe customer if we have one on file
   const { data: existingSub } = await supabase
     .from('subscriptions')
-    .select('stripe_customer_id')
+    .select('stripe_customer_id, stripe_subscription_id, status')
     .eq('user_id', user.id)
     .maybeSingle()
 
+  // If they already have an active subscription, change it in place rather
+  // than creating a new checkout session — creating a second one here is
+  // exactly what caused two simultaneously-billing subscriptions.
+  if (existingSub?.status === 'active' && existingSub.stripe_subscription_id) {
+    const currentSubscription = await stripe.subscriptions.retrieve(existingSub.stripe_subscription_id)
+    const currentItemId = currentSubscription.items.data[0]?.id
+
+    if (currentItemId) {
+      await stripe.subscriptions.update(existingSub.stripe_subscription_id, {
+        items: [{ id: currentItemId, price: priceId }],
+        proration_behavior: 'create_prorations',
+      })
+
+      return NextResponse.json({ switched: true })
+    }
+  }
+
+  // No existing active subscription — normal first-time checkout
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription',
     customer: existingSub?.stripe_customer_id || undefined,

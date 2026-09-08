@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
 function SignUpForm() {
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -28,6 +30,10 @@ function SignUpForm() {
       password,
       options: {
         emailRedirectTo: redirectTo,
+        data: {
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+        },
       },
     })
 
@@ -72,6 +78,15 @@ function SignUpForm() {
     )
   }
 
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '10px 12px',
+    borderRadius: '8px',
+    border: '1px solid rgba(0,0,0,0.14)',
+    fontSize: '14px',
+    color: '#0f1117',
+  }
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -108,6 +123,33 @@ function SignUpForm() {
         )}
 
         <form onSubmit={handleSignUp}>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '1rem' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '13px', fontWeight: 500, display: 'block', marginBottom: '4px', color: '#0f1117' }}>
+                First name
+              </label>
+              <input
+                type="text"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                required
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '13px', fontWeight: 500, display: 'block', marginBottom: '4px', color: '#0f1117' }}>
+                Last name
+              </label>
+              <input
+                type="text"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                required
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
           <div style={{ marginBottom: '1rem' }}>
             <label style={{ fontSize: '13px', fontWeight: 500, display: 'block', marginBottom: '4px', color: '#0f1117' }}>
               Email
@@ -117,14 +159,7 @@ function SignUpForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: '1px solid rgba(0,0,0,0.14)',
-                fontSize: '14px',
-                color: '#0f1117',
-              }}
+              style={inputStyle}
             />
           </div>
 
@@ -138,14 +173,7 @@ function SignUpForm() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: '1px solid rgba(0,0,0,0.14)',
-                fontSize: '14px',
-                color: '#0f1117',
-              }}
+              style={inputStyle}
             />
           </div>
 

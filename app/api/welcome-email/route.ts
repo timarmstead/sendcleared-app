@@ -10,10 +10,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
-  // Atomically "claim" the right to send this email, so two near-simultaneous
-  // requests (e.g. React re-running page-load logic) can never both send it.
-  // Only one of two concurrent requests can win this UPDATE, thanks to
-  // Postgres row-level locking during the write.
+  const { data: prefs } = await supabase
+    .from('user_preferences')
+    .select('welcome_email_sent')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (prefs?.welcome_email_sent) {
+    return NextResponse.json({ sent: false, reason: 'already_sent' })
+  }
+
   let claimed = false
 
   const { data: updated } = await supabase
@@ -26,10 +32,6 @@ export async function POST(request: NextRequest) {
   if (updated && updated.length > 0) {
     claimed = true
   } else {
-    // No existing row matched (either no row yet, or already sent).
-    // Try to INSERT — this only succeeds if no row exists at all, since
-    // user_id is the primary key. If a concurrent request already inserted
-    // it, this fails with a conflict and we correctly do NOT send again.
     const { error: insertErr } = await supabase
       .from('user_preferences')
       .insert({ user_id: user.id, welcome_email_sent: true })
@@ -43,6 +45,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ sent: false, reason: 'already_sent' })
   }
 
+  const firstName = (user.user_metadata?.first_name as string | undefined)?.trim()
+  const greeting = firstName ? `Welcome to SendCleared, ${firstName}` : 'Welcome to SendCleared'
+
   try {
     await resend.emails.send({
       from: 'SendCleared <notifications@sendcleared.com>',
@@ -50,7 +55,7 @@ export async function POST(request: NextRequest) {
       subject: 'Welcome to SendCleared 👋',
       html: `
         <div style="font-family:-apple-system,sans-serif;max-width:520px;margin:0 auto">
-          <h2 style="color:#134e8e">Welcome to SendCleared</h2>
+          <h2 style="color:#134e8e">${greeting} 👋</h2>
           <p>You're all set up. Here's how it works, in four steps:</p>
           <ol style="line-height:1.8;color:#0f1117">
             <li><strong>Add a client</strong> — you'll get a unique inbox address for them.</li>
@@ -72,9 +77,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ sent: true })
   } catch (err) {
     console.error('Failed to send welcome email:', err)
-    // The claim already succeeded, so welcome_email_sent stays true even
-    // if the send itself failed — we don't want to retry indefinitely on
-    // a persistently-failing address. Logged for visibility instead.
     return NextResponse.json({ sent: false, reason: 'send_failed' })
   }
 }

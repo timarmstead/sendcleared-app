@@ -34,6 +34,18 @@ type ClientData = {
   inbox_address: string
 }
 
+// Generic HTML-entity decode (named + numeric + hex), using the browser's own
+// parser rather than a hand-maintained regex list. Handles things like
+// &#847; (an invisible combining character some ESPs use to pad preview
+// text) correctly — it decodes to an actual invisible character instead of
+// displaying as literal "&#847;" text.
+function decodeHtmlEntities(str: string): string {
+  if (typeof window === 'undefined' || !str) return str
+  const el = document.createElement('textarea')
+  el.innerHTML = str
+  return el.value
+}
+
 export default function ReportPage() {
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [client, setClient] = useState<ClientData | null>(null)
@@ -183,6 +195,7 @@ export default function ReportPage() {
   const warningCount = allIssues.filter(i => i.severity === 'warning').length
   const passCount = allIssues.filter(i => i.severity === 'pass').length
   const status = report ? getStatusLabel(report.score) : null
+  const decodedPreheader = campaign.preheader ? decodeHtmlEntities(campaign.preheader) : ''
 
   const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
     padding: '5px 12px', fontSize: '12px', fontWeight: 500,
@@ -201,6 +214,9 @@ export default function ReportPage() {
 
       <div style={{ maxWidth: '900px', margin: '0 auto', padding: '2.5rem 2rem' }}>
 
+        <p style={{ fontSize: '11px', fontWeight: 700, color: '#9a9891', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: '4px' }}>
+          Subject line
+        </p>
         <h1 style={{
           fontSize: '1.4rem', fontWeight: 800, color: '#134e8e',
           marginBottom: '4px', letterSpacing: '-0.01em',
@@ -214,7 +230,7 @@ export default function ReportPage() {
           Reply-to: {campaign.reply_to || 'Not set'}
         </p>
         <p style={{ fontSize: '13px', color: '#5a5a56', marginBottom: '1.5rem' }}>
-          Preview text: {campaign.preheader || 'Not detected'}
+          Preview text: {decodedPreheader || 'Not detected'}
         </p>
 
         {!report && (

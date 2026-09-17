@@ -158,10 +158,14 @@ export default function ReportPage() {
     return '#d94040'
   }
 
-  function getStatusLabel(score: number) {
-    if (score >= 80) return { label: 'Send-ready', color: '#5a9020' }
-    if (score >= 60) return { label: 'Almost ready', color: '#b06d10' }
-    return { label: 'Needs work', color: '#d94040' }
+  // Derived from the SAME critical/warning counts as getHeadline() below —
+  // never from the numeric score. A high score with a lingering critical
+  // issue (e.g. missing physical address) must never show "Send-ready",
+  // since the headline text right below it says the opposite.
+  function getStatusLabel(criticalCount: number, warningCount: number) {
+    if (criticalCount > 0) return { label: 'Needs work', color: '#d94040' }
+    if (warningCount > 0) return { label: 'Almost ready', color: '#b06d10' }
+    return { label: 'Send-ready', color: '#5a9020' }
   }
 
   function getHeadline(criticalCount: number, warningCount: number) {
@@ -194,7 +198,7 @@ export default function ReportPage() {
   const criticalCount = allIssues.filter(i => i.severity === 'critical').length
   const warningCount = allIssues.filter(i => i.severity === 'warning').length
   const passCount = allIssues.filter(i => i.severity === 'pass').length
-  const status = report ? getStatusLabel(report.score) : null
+  const status = report ? getStatusLabel(criticalCount, warningCount) : null
   const decodedPreheader = campaign.preheader ? decodeHtmlEntities(campaign.preheader) : ''
 
   const toggleBtnStyle = (active: boolean): React.CSSProperties => ({

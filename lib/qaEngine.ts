@@ -37,6 +37,38 @@ const INLINE_TAGS = new Set([
   'big', 'tt', 'var', 'kbd', 'samp', 'ins', 'del', 'bdi', 'bdo', 'wbr',
 ])
 
+type Severity = 'critical' | 'warning' | 'info' | 'pass'
+
+interface Issue {
+  severity: Severity
+  text: string
+}
+
+const SECTION_NAMES = [
+  'Content & copy',
+  'Links & tracking',
+  'Accessibility',
+  'Spam signals',
+  'Rendering readiness',
+] as const
+
+type SectionName = (typeof SECTION_NAMES)[number]
+
+// How much each severity costs a section's score. Deterministic findings
+// always carry the same penalty for the same fact, so the same underlying
+// email can never score differently between runs based on severity alone.
+const SEVERITY_PENALTY: Record<Severity, number> = {
+  critical: 30,
+  warning: 12,
+  info: 0,
+  pass: 0,
+}
+
+function scoreFromIssues(issues: Issue[]): number {
+  const penalty = issues.reduce((sum, i) => sum + SEVERITY_PENALTY[i.severity], 0)
+  return Math.max(0, Math.min(100, 100 - penalty))
+}
+
 function decodeQP(str: string): string {
   return str
     .replace(/=\r?\n/g, '')
@@ -58,8 +90,6 @@ function extractTextFromHtml(html: string): string {
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
 
   // Replace each tag individually: inline tags -> '', block tags -> ' '.
-  // (Self-closing / void tags like <br> or <img> have no closing slash to
-  // worry about; the tag-name capture still works the same way.)
   const withTagsReplaced = withoutHiddenAndCode.replace(
     /<\/?([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g,
     (_match, tagName: string) => (INLINE_TAGS.has(tagName.toLowerCase()) ? '' : ' ')
@@ -273,6 +303,10 @@ function collapseDuplicateBlocks(text: string): { text: string; collapsedCount: 
   return { text: result.join(' '), collapsedCount }
 }
 
+function detectMsoSupport(html: string): boolean {
+  return /<!--\s*\[if\s+mso\]/i.test(html)
+}
+
 function sanitiseForJson(str: string): string {
   return str
     .replace(/\\/g, '\\\\')
@@ -282,6 +316,93 @@ function sanitiseForJson(str: string): string {
     .replace(/\t/g, ' ')
     .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
     .substring(0, 200)
+}
+
+// Every deterministic fact gets its severity and its section assigned HERE,
+// in code — never by the model. This is what makes the same underlying email
+// always produce the same severity for the same finding, run after run.
+function buildDeterministicSections(params: {
+  mergeTags: string[]
+  duplicateWords: string[]
+  utmCheck: { missing: number; total: number; espTracked: boolean }
+  htmlLinksCount: number
+  altTexts: { missing: number; total: number; missingSrcs: string[] }
+  decodedPlain: string
+  decodedHtml: string
+  preheader: string
+  collapsedCount: number
+}): Record<SectionName, Issue[]> {
+  const {
+    mergeTags, duplicateWords, utmCheck, htmlLinksCount,
+    altTexts, decodedPlain, decodedHtml, preheader, collapsedCount,
+  } = params
+
+  const hasUnsubscribe = decodedHtml.toLowerCase().includes('unsubscribe')
+  const hasPhysicalAddress =
+    /\d{1,4}\s+\w+.*?[A-Z]{1,2}\d/.test(decodedHtml + decodedPlain) ||
+    /[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/.test(decodedHtml + decodedPlain)
+  const hasMso = detectMsoSupport(decodedHtml)
+
+  const sections: Record<SectionName, Issue[]> = {
+    'Content & copy': [
+      mergeTags.length > 0
+        ? { severity: 'critical', text: `Unresolved merge tag(s) found: ${mergeTags.join(', ')}` }
+        : { severity: 'pass', text: 'No unresolved merge tags detected.' },
+      duplicateWords.length > 0
+        ? { severity: 'critical', text: `Duplicated consecutive word(s) found: ${duplicateWords.join(', ')}` }
+        : { severity: 'pass', text: 'No duplicated consecutive words detected.' },
+    ],
+
+    'Links & tracking': [
+      utmCheck.espTracked
+        ? { severity: 'pass', text: 'ESP link tracking confirmed — UTM parameters are tracked via redirect chain.' }
+        : utmCheck.total === 0
+        ? { severity: 'info', text: 'No trackable links found.' }
+        : utmCheck.missing === 0
+        ? { severity: 'pass', text: `All ${utmCheck.total} links have UTM parameters.` }
+        : { severity: 'warning', text: `${utmCheck.missing} of ${utmCheck.total} links are missing UTM parameters.` },
+      htmlLinksCount > 0
+        ? { severity: 'pass', text: `${htmlLinksCount} links found.` }
+        : { severity: 'warning', text: 'No links detected.' },
+    ],
+
+    'Accessibility': [
+      altTexts.total === 0
+        ? { severity: 'info', text: 'No content images found in email (tracking pixels excluded).' }
+        : altTexts.missing > 0
+        ? {
+            severity: 'critical',
+            text: `${altTexts.missing} of ${altTexts.total} content images are missing alt text entirely. Specifically: ${altTexts.missingSrcs.join(', ')}.`,
+          }
+        : { severity: 'pass', text: `All ${altTexts.total} content images have alt attributes.` },
+    ],
+
+    'Spam signals': [
+      hasUnsubscribe
+        ? { severity: 'pass', text: 'Unsubscribe link found.' }
+        : { severity: 'critical', text: 'No unsubscribe link detected.' },
+      hasPhysicalAddress
+        ? { severity: 'pass', text: 'Physical address found in email — CAN-SPAM/GDPR footer requirement met.' }
+        : { severity: 'critical', text: 'No physical address detected — required by CAN-SPAM and GDPR.' },
+    ],
+
+    'Rendering readiness': [
+      decodedPlain.length > 50
+        ? { severity: 'pass', text: 'Plain text version is present.' }
+        : { severity: 'warning', text: 'Plain text version is missing or very short.' },
+      preheader && preheader.length > 3
+        ? { severity: 'pass', text: `Preview text is set: "${preheader.substring(0, 80)}"` }
+        : { severity: 'warning', text: 'Preview text not detected — check your ESP preview text field.' },
+      collapsedCount > 0
+        ? { severity: 'info', text: `Detected ${collapsedCount} repeated content block(s), consistent with separate desktop/mobile copy — normal for responsive templates.` }
+        : { severity: 'info', text: 'No repeated content blocks detected.' },
+      hasMso
+        ? { severity: 'pass', text: 'MSO conditional comments detected — Outlook rendering support is in place.' }
+        : { severity: 'info', text: 'No MSO conditional comments detected — Outlook-specific rendering has not been confirmed.' },
+    ],
+  }
+
+  return sections
 }
 
 export async function runQA(email: {
@@ -304,60 +425,22 @@ export async function runQA(email: {
   const altTexts = extractAltTexts(decodedHtml)
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(htmlLinks)
-
   const duplicateWords = detectDuplicateWords(rawTextContent)
 
   const { text: dedupedText, collapsedCount } = collapseDuplicateBlocks(rawTextContent)
   const textContent = truncateAtWordBoundary(dedupedText, 2000)
 
-  const deterministicChecks = [
-    mergeTags.length > 0
-      ? `CRITICAL: Unresolved merge tags found: ${mergeTags.join(', ')}`
-      : 'PASS: No unresolved merge tags detected',
-
-    duplicateWords.length > 0
-      ? `CRITICAL: Duplicated consecutive word(s) found: ${duplicateWords.join(', ')}`
-      : 'PASS: No duplicated consecutive words detected',
-
-    collapsedCount > 0
-      ? `INFO: Detected ${collapsedCount} repeated content block(s), consistent with separate desktop/mobile copy — this is normal for responsive templates and has not been flagged as an error`
-      : 'INFO: No repeated content blocks detected',
-
-    utmCheck.espTracked
-      ? `PASS: ESP link tracking confirmed — UTM parameters are tracked via redirect chain (standard for Klaviyo, Braze, Mailchimp etc)`
-      : utmCheck.total === 0
-      ? 'INFO: No trackable links found'
-      : utmCheck.missing === 0
-      ? `PASS: All ${utmCheck.total} links have UTM parameters`
-      : `WARNING: ${utmCheck.missing} of ${utmCheck.total} links are missing UTM parameters`,
-
-    altTexts.total === 0
-      ? 'INFO: No content images found in email (tracking pixels excluded)'
-      : altTexts.missing > 0
-      ? `WARNING: ${altTexts.missing} of ${altTexts.total} content images are missing alt text entirely. Specifically: ${altTexts.missingSrcs.join(', ')}. Note: images with alt="" (empty) are correctly marked decorative and are not counted as missing.`
-      : `PASS: All ${altTexts.total} content images have alt attributes (tracking pixels excluded; alt="" on decorative images is correct and counted as present)`,
-
-    decodedPlain.length > 50
-      ? 'PASS: Plain text version present'
-      : 'WARNING: Plain text version is missing or very short',
-
-    decodedHtml.toLowerCase().includes('unsubscribe')
-      ? 'PASS: Unsubscribe link found'
-      : 'CRITICAL: No unsubscribe link detected',
-
-    /\d{1,4}\s+\w+.*?[A-Z]{1,2}\d/.test(decodedHtml + decodedPlain) ||
-    /[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/.test(decodedHtml + decodedPlain)
-      ? 'PASS: Physical address found in email'
-      : 'CRITICAL: No physical address detected — required by CAN-SPAM and GDPR',
-
-    email.preheader && email.preheader.length > 3
-      ? `PASS: Preview text set: "${email.preheader.substring(0, 80)}"`
-      : 'WARNING: Preview text not detected — check your ESP preview text field',
-
-    htmlLinks.length > 0
-      ? `PASS: ${htmlLinks.length} links found`
-      : 'WARNING: No links detected',
-  ]
+  const deterministicSections = buildDeterministicSections({
+    mergeTags,
+    duplicateWords,
+    utmCheck,
+    htmlLinksCount: htmlLinks.length,
+    altTexts,
+    decodedPlain,
+    decodedHtml,
+    preheader: email.preheader,
+    collapsedCount,
+  })
 
   const safeTextContent = textContent
     .replace(/\\/g, '')
@@ -368,18 +451,19 @@ export async function runQA(email: {
   const safeFrom = sanitiseForJson(email.from)
   const safePreheader = email.preheader ? sanitiseForJson(email.preheader) : ''
 
+  const alreadyHandled = SECTION_NAMES.flatMap(name =>
+    deterministicSections[name].map(issue => `[${name}] ${issue.text}`)
+  ).join('\n')
+
   const meta = [
     `Subject line: "${safeSubject}" (${email.subject.length} chars)`,
     `From: ${safeFrom}`,
     safePreheader ? `Preview text: "${safePreheader}"` : 'Preview text: NOT DETECTED',
-    `Plain text: ${decodedPlain.length > 50 ? 'present' : 'missing'}`,
-    `HTML links: ${htmlLinks.length}`,
-    `Content images: ${altTexts.total} total (tracking pixels excluded), ${altTexts.missing} missing alt text`,
     '',
-    'PRE-CHECKED FINDINGS — these are facts, do not contradict:',
-    ...deterministicChecks,
+    'ALREADY HANDLED — these facts are final and have already been assigned a section and a severity in code. Do NOT re-report, re-judge, or contradict any of these; do not invent your own version of any of them:',
+    alreadyHandled,
     '',
-    'IMPORTANT: The email text content below has been truncated to a reasonable length for processing, cut cleanly at a word boundary. This is a normal part of QA processing, not a rendering defect — do NOT flag this as "truncated content" or a "rendering issue" in your response.',
+    'IMPORTANT: The email text content below has been truncated to a reasonable length for processing, cut cleanly at a word boundary. This is a normal part of QA processing, not a rendering defect — do NOT flag this as "truncated content" or a "rendering issue".',
     '',
     'Email text content (desktop/mobile duplicate blocks already consolidated — treat as single copy):',
     safeTextContent,
@@ -387,69 +471,34 @@ export async function runQA(email: {
 
   const prompt = `You are SendCleared, an expert email marketing QA agent. Return ONLY valid JSON. No markdown, no backticks, no text outside the JSON.
 
-RULES:
-- Sending from a subdomain (send.domain.com, mail.domain.com) is normal for ESPs — never flag this
-- The PRE-CHECKED FINDINGS below are accurate and deterministic — never contradict them
-- If ESP tracking is confirmed with UTM pass, do not flag UTM issues anywhere in your response
-- Duplicated consecutive words have ALREADY been checked deterministically (see PRE-CHECKED FINDINGS) — do not re-check for this yourself, just reflect the given finding in the Content & copy section
-- Repeated content blocks (desktop vs mobile copy) have ALREADY been consolidated before you received this text — never flag "duplicate content" or "repeated paragraph" as an issue, since what you're reading is already deduplicated
-- The email text content is truncated for processing purposes only — never flag this as a rendering or content-cutoff issue
-- Alt text findings have ALREADY been checked deterministically, with tracking pixels excluded and alt="" correctly treated as valid (decorative) — reflect the given finding exactly rather than re-checking images yourself
-- Use single quotes only in all text fields — never double quotes inside strings
-- Keep all issue text under 100 characters
+Your job is narrow: everything deterministic has ALREADY been checked and categorised (see ALREADY HANDLED below). You are only being asked for:
+1. A 2-3 sentence overall summary of the email's readiness, in plain prose, using single quotes only — never double quotes inside strings. You may cite the exact figures given to you above; never invent or estimate a figure you were not given.
+2. Any GENUINELY SUBJECTIVE additional findings, one array per section, that a deterministic check cannot make — specifically:
+   - "Content & copy": typos, misspellings, missing words, and grammatical errors found by proofreading the email text below, word by word, like a professional proofreader. Quote the exact error. If none found, return an empty array — do not report a "pass" here, that's implied by finding nothing.
+   - "Links & tracking": e.g. a note on the sending domain needing SPF/DKIM/DMARC verification, if relevant. Empty array if nothing to add.
+   - "Accessibility": e.g. a note on CTA button colour contrast if it can reasonably be judged from inline styles. Empty array if nothing to add.
+   - "Spam signals": subjective spam-trigger wording, tone, excessive punctuation or capitalisation in the subject line or body copy. Empty array if nothing to add.
+   - "Rendering readiness": any subjective rendering nuance not already covered (e.g. preview text length recommendation). Empty array if nothing to add.
 
-PROOFREADING REQUIREMENT — this is mandatory, not optional:
-- Carefully read the "Email text content" below word by word, as a professional proofreader would, not just skimming for tone or messaging quality
-- Explicitly check for: missing words, misspellings, incorrect punctuation, and grammatical errors (duplicated words are already handled above — don't re-flag)
-- If ANY typo or grammatical error is found in the subject line, preview text, or body copy, it MUST be flagged as a "critical" or "warning" issue in the "Content & copy" section, quoting the exact error found
-- Do not report "Content & copy" as fully passing unless you have actually checked every sentence for these specific error types
+RULES:
+- Severity for anything you add must be "critical", "warning", or "info" only — never "pass" (pass is only for the deterministic facts, which are already handled).
+- Keep all issue text under 100 characters.
+- Do not comment on or contradict anything in the ALREADY HANDLED list.
+- It is completely normal and expected for a section's array to be empty — do not invent an issue just to fill it.
 
 ${meta}
 
-Return this exact JSON:
+Return this exact JSON shape:
 {
-  "score": 75,
   "summary": "Two to three sentence summary using single quotes only.",
-  "sections": [
-    {
-      "name": "Content & copy",
-      "score": 80,
-      "issues": [
-        { "severity": "pass", "text": "Finding using single quotes only." }
-      ]
-    },
-    {
-      "name": "Links & tracking",
-      "score": 80,
-      "issues": [
-        { "severity": "pass", "text": "Finding here." }
-      ]
-    },
-    {
-      "name": "Accessibility",
-      "score": 80,
-      "issues": [
-        { "severity": "pass", "text": "Finding here." }
-      ]
-    },
-    {
-      "name": "Spam signals",
-      "score": 80,
-      "issues": [
-        { "severity": "pass", "text": "Finding here." }
-      ]
-    },
-    {
-      "name": "Rendering readiness",
-      "score": 80,
-      "issues": [
-        { "severity": "pass", "text": "Finding here." }
-      ]
-    }
-  ]
-}
-
-Each section: 3-4 issues. Severity: critical, warning, info, or pass.`
+  "extraIssues": {
+    "Content & copy": [ { "severity": "warning", "text": "Example only — omit if nothing found." } ],
+    "Links & tracking": [],
+    "Accessibility": [],
+    "Spam signals": [],
+    "Rendering readiness": []
+  }
+}`
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
@@ -474,11 +523,33 @@ Each section: 3-4 issues. Severity: critical, warning, info, or pass.`
 
   const jsonString = cleaned.substring(start, end + 1)
 
+  let modelOutput: { summary: string; extraIssues: Partial<Record<SectionName, Issue[]>> }
   try {
-    const parsed = JSON.parse(jsonString)
-    return { ...parsed, ctas }
+    modelOutput = JSON.parse(jsonString)
   } catch (parseError) {
     console.error('JSON parse error:', jsonString.substring(0, 500))
     throw new Error(`JSON parse failed: ${parseError}`)
+  }
+
+  // Merge: deterministic issues first, then whatever the model added — and
+  // strip anything the model tries to mark "pass", since that severity is
+  // reserved for deterministic facts only.
+  const sections = SECTION_NAMES.map(name => {
+    const extra = (modelOutput.extraIssues?.[name] || []).filter(i => i.severity !== 'pass')
+    const issues = [...deterministicSections[name], ...extra]
+    return {
+      name,
+      score: scoreFromIssues(issues),
+      issues,
+    }
+  })
+
+  const score = Math.round(sections.reduce((sum, s) => sum + s.score, 0) / sections.length)
+
+  return {
+    score,
+    summary: modelOutput.summary,
+    sections,
+    ctas,
   }
 }

@@ -24,6 +24,19 @@ const ESP_TRACKING_DOMAINS = [
   'manage.kmail-lists.com',
 ]
 
+// Tags that can legitimately sit MID-WORD or mid-sentence with no surrounding
+// whitespace — e.g. text pasted from Word/Outlook often splits a single word
+// across a bare text node and a <span>, like: R<span>amblers</span>.
+// These must be stripped with NO space, or the typo checker sees two words
+// where the rendered email shows one. Block-level tags (p, div, td, li, br,
+// etc.) are the opposite case — those really do separate distinct chunks of
+// copy, so they keep the space.
+const INLINE_TAGS = new Set([
+  'a', 'span', 'b', 'i', 'u', 'em', 'strong', 'sub', 'sup', 'small', 'mark',
+  'abbr', 'cite', 'code', 'q', 'time', 'data', 'label', 'font', 'strike', 's',
+  'big', 'tt', 'var', 'kbd', 'samp', 'ins', 'del', 'bdi', 'bdo', 'wbr',
+])
+
 function decodeQP(str: string): string {
   return str
     .replace(/=\r?\n/g, '')
@@ -40,12 +53,19 @@ function stripHiddenDivs(html: string): string {
 }
 
 function extractTextFromHtml(html: string): string {
-  return stripHiddenDivs(html)
+  const withoutHiddenAndCode = stripHiddenDivs(html)
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+
+  // Replace each tag individually: inline tags -> '', block tags -> ' '.
+  // (Self-closing / void tags like <br> or <img> have no closing slash to
+  // worry about; the tag-name capture still works the same way.)
+  const withTagsReplaced = withoutHiddenAndCode.replace(
+    /<\/?([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g,
+    (_match, tagName: string) => (INLINE_TAGS.has(tagName.toLowerCase()) ? '' : ' ')
+  )
+
+  return withTagsReplaced.replace(/\s+/g, ' ').trim()
 }
 
 function truncateAtWordBoundary(text: string, maxLength: number): string {

@@ -475,13 +475,14 @@ Your job is narrow: everything deterministic has ALREADY been checked and catego
 1. A 2-3 sentence overall summary of the email's readiness, in plain prose, using single quotes only — never double quotes inside strings. You may cite the exact figures given to you above; never invent or estimate a figure you were not given.
 2. Any GENUINELY SUBJECTIVE additional findings, one array per section, that a deterministic check cannot make — specifically:
    - "Content & copy": typos, misspellings, missing words, and grammatical errors found by proofreading the email text below, word by word, like a professional proofreader. Quote the exact error. If none found, return an empty array — do not report a "pass" here, that's implied by finding nothing.
-   - "Links & tracking": e.g. a note on the sending domain needing SPF/DKIM/DMARC verification, if relevant. Empty array if nothing to add.
-   - "Accessibility": e.g. a note on CTA button colour contrast if it can reasonably be judged from inline styles. Empty array if nothing to add.
+   - "Links & tracking": e.g. a suggestion (severity "info" only — see RULES) to verify SPF/DKIM/DMARC for the sending domain, if relevant. Empty array if nothing to add.
+   - "Accessibility": e.g. a suggestion (severity "info" only — see RULES) to check CTA button colour contrast. Empty array if nothing to add.
    - "Spam signals": subjective spam-trigger wording, tone, excessive punctuation or capitalisation in the subject line or body copy. Empty array if nothing to add.
    - "Rendering readiness": any subjective rendering nuance not already covered (e.g. preview text length recommendation). Empty array if nothing to add.
 
 RULES:
 - Severity for anything you add must be "critical", "warning", or "info" only — never "pass" (pass is only for the deterministic facts, which are already handled).
+- Severity reflects CONFIDENCE, not importance. Use "warning" or "critical" ONLY for something you can directly confirm from the actual email text/HTML given to you. If you are suggesting something be verified, checked, or double-checked — anything you cannot confirm yourself from what's in front of you (e.g. whether SPF/DKIM/DMARC records are actually published, whether a CTA button's contrast ratio actually passes WCAG) — that is always "info", never "warning" or "critical", no matter how important the underlying issue would be if true.
 - Keep all issue text under 100 characters.
 - Do not comment on or contradict anything in the ALREADY HANDLED list.
 - It is completely normal and expected for a section's array to be empty — do not invent an issue just to fill it.

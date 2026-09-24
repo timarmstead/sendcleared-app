@@ -213,6 +213,7 @@ export default function ReportPage() {
       minHeight: '100vh',
       background: '#f7f7f5',
       fontFamily: '-apple-system, sans-serif',
+      color: '#0f1117',
     }}>
       <DashboardHeader showBack />
 
@@ -259,7 +260,7 @@ export default function ReportPage() {
                 <p style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: '6px', color: status.color }}>
                   {status.label}
                 </p>
-                <p style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: '8px', letterSpacing: '-0.01em' }}>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: '8px', letterSpacing: '-0.01em', color: '#0f1117' }}>
                   {getHeadline(criticalCount, warningCount)}
                 </p>
                 <p style={{ fontSize: '13px', color: '#5a5a56', marginBottom: '1.1rem' }}>
@@ -289,7 +290,7 @@ export default function ReportPage() {
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                   borderWidth: '5px', borderStyle: 'solid', borderColor: getScoreColor(report.score),
                 }}>
-                  <span style={{ fontSize: '26px', fontWeight: 800, lineHeight: 1 }}>{report.score}</span>
+                  <span style={{ fontSize: '26px', fontWeight: 800, lineHeight: 1, color: '#0f1117' }}>{report.score}</span>
                   <span style={{ fontSize: '10px', color: '#9a9891' }}>/100</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -409,7 +410,7 @@ export default function ReportPage() {
               {/* Sidebar */}
               <div>
                 <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.09)', padding: '1.1rem', marginBottom: '1rem' }}>
-                  <p style={{ fontSize: '13px', fontWeight: 700, marginBottom: '.9rem' }}>Category breakdown</p>
+                  <p style={{ fontSize: '13px', fontWeight: 700, marginBottom: '.9rem', color: '#0f1117' }}>Category breakdown</p>
                   {report.sections?.map((section, i) => (
                     <div key={i} style={{ marginBottom: i < report.sections.length - 1 ? '.85rem' : 0 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#5a5a56', marginBottom: '4px' }}>
@@ -423,7 +424,7 @@ export default function ReportPage() {
                 </div>
 
                 <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.09)', padding: '1.1rem', marginBottom: '1rem' }}>
-                  <p style={{ fontSize: '13px', fontWeight: 700, marginBottom: '.9rem' }}>Made changes?</p>
+                  <p style={{ fontSize: '13px', fontWeight: 700, marginBottom: '.9rem', color: '#0f1117' }}>Made changes?</p>
                   <p style={{ fontSize: '12px', color: '#5a5a56', lineHeight: 1.5, marginBottom: '.75rem' }}>
                     Fix the issues in your ESP, then resend a test email to this same address to see your updated score.
                   </p>

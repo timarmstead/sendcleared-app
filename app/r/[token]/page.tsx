@@ -154,6 +154,7 @@ export default function ApprovalPage() {
     minHeight: '100vh',
     background: '#f7f7f5',
     fontFamily: '-apple-system, sans-serif',
+    color: '#0f1117',
   }
   const containerStyle: React.CSSProperties = {
     maxWidth: '800px',
@@ -277,6 +278,16 @@ export default function ApprovalPage() {
           gap: '1rem',
         }}>
           <div>
+            <p style={{
+              fontSize: '11px',
+              fontWeight: 700,
+              color: '#9a9891',
+              textTransform: 'uppercase',
+              letterSpacing: '.06em',
+              marginBottom: '4px',
+            }}>
+              Subject line
+            </p>
             <h1 style={{
               fontSize: '1.4rem',
               fontWeight: 800,

@@ -30,6 +30,9 @@ export default function ClientDetail() {
   const [approvalMap, setApprovalMap] = useState<Record<string, ApprovalStatus>>({})
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null)
+  const [archivingId, setArchivingId] = useState<string | null>(null)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
   const router = useRouter()
   const params = useParams()
   const clientId = params.id as string
@@ -53,10 +56,13 @@ export default function ClientDetail() {
 
     if (clientData) setClient(clientData)
 
+    // archived_at IS NULL — archived test sends are hidden from this list
+    // but never deleted, so they can be restored later if needed.
     const { data: campaignData } = await supabase
       .from('campaigns')
       .select('*')
       .eq('client_id', clientId)
+      .is('archived_at', null)
       .order('received_at', { ascending: false })
 
     if (campaignData) {
@@ -123,6 +129,41 @@ export default function ClientDetail() {
     }
   }
 
+  // A test send can only be archived if it has never had a real approval
+  // decision made on it (approved or changes requested). Those two statuses
+  // ARE the audit record this tool exists to produce, so they're protected —
+  // no approval at all, or a still-"pending" one, is safe to tidy away.
+  function canArchive(campaignId: string) {
+    const approval = approvalMap[campaignId]
+    return !approval || approval.status === 'pending'
+  }
+
+  async function handleArchive(campaignId: string) {
+    if (!canArchive(campaignId)) {
+      setArchiveError("This test can't be archived — it already has an approval record.")
+      setConfirmArchiveId(null)
+      return
+    }
+
+    setArchivingId(campaignId)
+    setArchiveError(null)
+
+    const { error } = await supabase
+      .from('campaigns')
+      .update({ archived_at: new Date().toISOString() })
+      .eq('id', campaignId)
+
+    if (error) {
+      setArchiveError('Something went wrong archiving this test — please try again.')
+      setArchivingId(null)
+      return
+    }
+
+    setCampaigns(prev => prev.filter(c => c.id !== campaignId))
+    setConfirmArchiveId(null)
+    setArchivingId(null)
+  }
+
   if (loading) {
     return <div style={{ padding: '3rem', fontFamily: '-apple-system, sans-serif' }}>Loading...</div>
   }
@@ -132,7 +173,7 @@ export default function ClientDetail() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f7f7f5', fontFamily: '-apple-system, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: '#f7f7f5', fontFamily: '-apple-system, sans-serif', color: '#0f1117' }}>
       <DashboardHeader showBack />
 
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '2.5rem 2rem' }}>
@@ -190,6 +231,15 @@ export default function ClientDetail() {
           Test sends ({campaigns.length})
         </h2>
 
+        {archiveError && (
+          <div style={{
+            background: '#fcebeb', border: '1px solid #d94040', borderRadius: '8px',
+            padding: '10px 14px', marginBottom: '12px', fontSize: '13px', color: '#791f1f',
+          }}>
+            {archiveError}
+          </div>
+        )}
+
         {campaigns.length === 0 ? (
           <div style={{
             background: '#fff',
@@ -210,6 +260,10 @@ export default function ClientDetail() {
             {campaigns.map((campaign) => {
               const badge = getStatusBadge(campaign.id)
               const approval = approvalMap[campaign.id]
+              const archivable = canArchive(campaign.id)
+              const isConfirming = confirmArchiveId === campaign.id
+              const isArchiving = archivingId === campaign.id
+
               return (
                 <div
                   key={campaign.id}
@@ -248,24 +302,46 @@ export default function ClientDetail() {
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={() => router.push(`/dashboard/report/${campaign.id}`)}
-                      style={{
-                        background: '#134e8e',
-                        color: '#fff',
-                        border: 'none',
-                        padding: '8px 16px',
-                        borderRadius: '8px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                        flexShrink: 0,
-                      }}
-                    >
-                      View report
-                    </button>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button
+                        onClick={() => router.push(`/dashboard/report/${campaign.id}`)}
+                        style={{
+                          background: '#134e8e',
+                          color: '#fff',
+                          border: 'none',
+                          padding: '8px 16px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        View report
+                      </button>
+
+                      <button
+                        onClick={() => setConfirmArchiveId(campaign.id)}
+                        disabled={!archivable}
+                        title={archivable ? undefined : "Can't archive — this test has an approval record"}
+                        style={{
+                          background: '#fff',
+                          color: archivable ? '#5a5a56' : '#c9c7c1',
+                          border: '1px solid rgba(0,0,0,0.14)',
+                          padding: '8px 16px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: archivable ? 'pointer' : 'not-allowed',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Archive test
+                      </button>
+                    </div>
                   </div>
+
                   {approval?.status === 'changes_requested' && approval.changes_requested && (
                     <p style={{
                       fontSize: '12px',
@@ -277,6 +353,39 @@ export default function ClientDetail() {
                     }}>
                       "{approval.changes_requested}"
                     </p>
+                  )}
+
+                  {isConfirming && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px',
+                      background: '#f7f7f5', borderRadius: '8px', padding: '10px 12px',
+                    }}>
+                      <span style={{ fontSize: '13px', color: '#0f1117', flex: 1 }}>
+                        Archive this test send? It'll be hidden from this list but can be recovered.
+                      </span>
+                      <button
+                        onClick={() => handleArchive(campaign.id)}
+                        disabled={isArchiving}
+                        style={{
+                          background: '#d94040', color: '#fff', border: 'none',
+                          padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
+                          cursor: isArchiving ? 'default' : 'pointer', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {isArchiving ? 'Archiving…' : 'Yes, archive'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmArchiveId(null)}
+                        disabled={isArchiving}
+                        style={{
+                          background: '#fff', color: '#5a5a56', border: '1px solid rgba(0,0,0,0.14)',
+                          padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
+                          cursor: isArchiving ? 'default' : 'pointer', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   )}
                 </div>
               )

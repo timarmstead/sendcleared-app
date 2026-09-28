@@ -460,10 +460,17 @@ function authResults(headers: EmailHeaders, mechanism: 'spf' | 'dkim' | 'dmarc')
   return [...headers.authenticationResults.matchAll(re)].map(m => m[1].toLowerCase())
 }
 
+// CloudMailin reports SPF results with underscores (e.g. 'soft_fail'); the RFC
+// spelling is 'softfail'. Normalise every spelling to one form before comparing.
+function normaliseSpfResult(raw: string): string {
+  const cleaned = raw.trim().toLowerCase().replace(/[\s_\-]/g, '')
+  return cleaned === 'hardfail' ? 'fail' : cleaned
+}
+
 function resolveSpf(headers: EmailHeaders): string | null {
   const fromAuthResults = authResults(headers, 'spf')[0]
-  if (fromAuthResults) return fromAuthResults
-  if (headers.envelopeSpfResult.trim()) return headers.envelopeSpfResult.trim().toLowerCase()
+  if (fromAuthResults) return normaliseSpfResult(fromAuthResults)
+  if (headers.envelopeSpfResult.trim()) return normaliseSpfResult(headers.envelopeSpfResult)
   const m = headers.receivedSpf.match(/^\s*(pass|fail|softfail|neutral|none|temperror|permerror)\b/i)
   return m ? m[1].toLowerCase() : null
 }

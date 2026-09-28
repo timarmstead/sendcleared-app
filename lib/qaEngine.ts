@@ -49,10 +49,49 @@ const SECTION_NAMES = [
   'Links & tracking',
   'Accessibility',
   'Spam signals',
+  'Deliverability',
   'Rendering readiness',
 ] as const
 
 type SectionName = (typeof SECTION_NAMES)[number]
+
+// Header data passed in from the inbound webhook. Everything here is a raw
+// fact taken from the received email — nothing is guessed. `available` is
+// false when we couldn't capture a meaningful header set at all, so "header
+// absent" can be told apart from "headers never reached us".
+export interface EmailHeaders {
+  available: boolean
+  listUnsubscribe: string
+  listUnsubscribePost: string
+  authenticationResults: string
+  receivedSpf: string
+  dkimSignature: string
+  envelopeSpfResult: string
+}
+
+const EMPTY_HEADERS: EmailHeaders = {
+  available: false,
+  listUnsubscribe: '',
+  listUnsubscribePost: '',
+  authenticationResults: '',
+  receivedSpf: '',
+  dkimSignature: '',
+  envelopeSpfResult: '',
+}
+
+// Deliberately conservative: phrases that are strong spam signals AND rare in
+// legitimate eCommerce copy. Things like 'free shipping', 'sale' or 'limited
+// time' are normal marketing language and are intentionally NOT on this list.
+const SPAM_TRIGGER_PHRASES = [
+  'act now', 'act immediately', 'not spam', 'no obligation', 'no strings attached',
+  'risk-free', 'risk free', '100% free', '100% guaranteed',
+  'you have been selected', "you've been selected",
+  'you are a winner', "you're a winner", 'you have won', 'claim your prize',
+  'cash bonus', 'earn extra cash', 'earn money fast', 'make money fast',
+  'make money online', 'extra income', 'double your income', 'no credit check',
+  'dear friend', 'click here', 'click below', 'what are you waiting for',
+  'viagra', 'miracle cure', '$$$',
+]
 
 // How much each severity costs a section's score. Deterministic findings
 // always carry the same penalty for the same fact, so the same underlying
@@ -86,6 +125,11 @@ function stripHiddenDivs(html: string): string {
 
 function extractTextFromHtml(html: string): string {
   const withoutHiddenAndCode = stripHiddenDivs(html)
+    // Comments (incl. Outlook <!--[if mso]> blocks) and <!DOCTYPE> aren't
+    // rendered text. The tag regex below only matches tags starting with a
+    // letter, so these must be removed first or they leak into the copy.
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<![^>]*>/g, ' ')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
 
@@ -307,6 +351,229 @@ function detectMsoSupport(html: string): boolean {
   return /<!--\s*\[if\s+mso\]/i.test(html)
 }
 
+function normaliseForMatching(text: string): string {
+  return decodeHtmlEntities(text).replace(/[\u2018\u2019]/g, "'").toLowerCase()
+}
+
+function findSpamTriggers(text: string): string[] {
+  const haystack = normaliseForMatching(text)
+  const found: string[] = []
+  for (const phrase of SPAM_TRIGGER_PHRASES) {
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const startBoundary = /^\w/.test(phrase) ? '\\b' : ''
+    const endBoundary = /\w$/.test(phrase) ? '\\b' : ''
+    if (new RegExp(startBoundary + escaped + endBoundary, 'i').test(haystack)) {
+      found.push(phrase)
+    }
+  }
+  return found
+}
+
+function analyseSpamTriggers(subject: string, bodyText: string): Issue {
+  const inSubject = findSpamTriggers(subject)
+  const inBody = findSpamTriggers(bodyText).filter(p => !inSubject.includes(p))
+  const all = [...inSubject, ...inBody]
+
+  if (all.length === 0) {
+    return { severity: 'pass', text: 'No common spam-trigger phrases found in the subject line or body copy.' }
+  }
+
+  const list = all.slice(0, 5).map(p => `'${p}'`).join(', ')
+  const where = inSubject.length > 0 ? ' (including in the subject line)' : ''
+  return {
+    // A trigger phrase in the subject matters most; in the body it takes a few to matter.
+    severity: inSubject.length > 0 || all.length >= 3 ? 'warning' : 'info',
+    text: `Spam-trigger phrase(s) found${where}: ${list}. Consider rewording.`,
+  }
+}
+
+function analyseSubject(rawSubject: string): Issue[] {
+  const issues: Issue[] = []
+  const testPrefix = rawSubject.match(/^\s*\[(preview|test)\]\s*/i)
+  const subject = rawSubject.replace(/^\s*\[(preview|test)\]\s*/i, '').trim()
+
+  if (testPrefix) {
+    issues.push({
+      severity: 'info',
+      text: `Subject has an ESP test prefix '${testPrefix[0].trim()}' — expected on test sends, not on live sends.`,
+    })
+  }
+
+  if (subject.length === 0) {
+    issues.push({ severity: 'warning', text: 'Subject line is empty.' })
+    return issues
+  }
+
+  let flagged = false
+
+  const letters = subject.replace(/[^A-Za-z]/g, '')
+  const upperLetters = subject.replace(/[^A-Z]/g, '')
+  const allCapsWords = subject.split(/\s+/).filter(w => /^[A-Z]{3,}$/.test(w.replace(/[^A-Za-z]/g, ''))).length
+  if ((letters.length >= 8 && upperLetters.length / letters.length > 0.6) || allCapsWords >= 3) {
+    flagged = true
+    issues.push({ severity: 'warning', text: 'Subject line is mostly capitals — a common spam-filter trigger.' })
+  }
+
+  if (/[!?]{2,}/.test(subject) || (subject.match(/!/g) || []).length >= 3) {
+    flagged = true
+    issues.push({ severity: 'warning', text: 'Subject line has excessive punctuation (e.g. !!! or ???).' })
+  }
+
+  if (/^\s*(re|fwd?|fw):/i.test(subject)) {
+    flagged = true
+    issues.push({ severity: 'warning', text: "Subject starts with 'Re:' or 'Fwd:' — fake reply prefixes are a spam signal." })
+  }
+
+  if (subject.length > 80) {
+    issues.push({ severity: 'info', text: `Subject line is ${subject.length} characters — likely to be cut off on mobile.` })
+  } else if (subject.length < 10) {
+    issues.push({ severity: 'info', text: `Subject line is very short (${subject.length} characters).` })
+  }
+
+  if (!flagged) {
+    issues.push({ severity: 'pass', text: 'Subject line has no obvious spam patterns (capitals, punctuation, fake prefixes).' })
+  }
+
+  return issues
+}
+
+function analyseTextImageBalance(text: string, imageCount: number): Issue {
+  const words = text.split(/\s+/).filter(Boolean).length
+
+  if (imageCount >= 3 && words < 50) {
+    return {
+      severity: 'warning',
+      text: `Very little text (${words} words) alongside ${imageCount} images — image-led emails are a spam trigger and look blank with images off.`,
+    }
+  }
+  if (imageCount >= 5 && words / imageCount < 12) {
+    return {
+      severity: 'info',
+      text: `Image-heavy email (${words} words, ${imageCount} images) — make sure the key message still works with images blocked.`,
+    }
+  }
+  return { severity: 'pass', text: `Healthy text-to-image balance (${words} words, ${imageCount} images).` }
+}
+
+function authResults(headers: EmailHeaders, mechanism: 'spf' | 'dkim' | 'dmarc'): string[] {
+  const re = new RegExp(`\\b${mechanism}\\s*=\\s*([a-z]+)`, 'gi')
+  return [...headers.authenticationResults.matchAll(re)].map(m => m[1].toLowerCase())
+}
+
+function resolveSpf(headers: EmailHeaders): string | null {
+  const fromAuthResults = authResults(headers, 'spf')[0]
+  if (fromAuthResults) return fromAuthResults
+  if (headers.envelopeSpfResult.trim()) return headers.envelopeSpfResult.trim().toLowerCase()
+  const m = headers.receivedSpf.match(/^\s*(pass|fail|softfail|neutral|none|temperror|permerror)\b/i)
+  return m ? m[1].toLowerCase() : null
+}
+
+function dkimSigningDomains(headers: EmailHeaders): string[] {
+  return [...headers.dkimSignature.matchAll(/(?:^|[;\s])d=([a-z0-9.\-]+\.[a-z]{2,})/gi)].map(m => m[1].toLowerCase())
+}
+
+function domainsAlign(a: string, b: string): boolean {
+  if (!a || !b) return false
+  return a === b || a.endsWith('.' + b) || b.endsWith('.' + a)
+}
+
+// Everything here is a measured fact from the email's own headers. Where the
+// header data simply isn't there, we say so as 'info' — never as a guess.
+function buildDeliverabilityIssues(headers: EmailHeaders, fromDomain: string): Issue[] {
+  if (!headers.available) {
+    return [{
+      severity: 'info',
+      text: 'Email headers were not captured for this test send, so SPF, DKIM, DMARC and unsubscribe-header checks were skipped.',
+    }]
+  }
+
+  const issues: Issue[] = []
+
+  // SPF
+  const spf = resolveSpf(headers)
+  if (spf === 'pass') {
+    issues.push({ severity: 'pass', text: 'SPF check passed.' })
+  } else if (spf === 'fail' || spf === 'softfail') {
+    issues.push({ severity: 'warning', text: `SPF ${spf} — the sending server isn't authorised by this domain's SPF record.` })
+  } else if (spf === 'none') {
+    issues.push({ severity: 'warning', text: 'No SPF record found for the sending domain.' })
+  } else if (spf === 'permerror') {
+    issues.push({ severity: 'warning', text: 'SPF permerror — the SPF record is invalid (e.g. too many DNS lookups).' })
+  } else if (spf) {
+    issues.push({ severity: 'info', text: `SPF result: ${spf} — inconclusive.` })
+  }
+
+  // DKIM
+  const dkimVerdicts = authResults(headers, 'dkim')
+  const dkimDomains = dkimSigningDomains(headers)
+  if (dkimVerdicts.includes('pass')) {
+    issues.push({ severity: 'pass', text: 'DKIM signature verified.' })
+  } else if (dkimVerdicts.includes('fail')) {
+    issues.push({ severity: 'warning', text: "DKIM verification failed — the message signature didn't validate." })
+  } else if (dkimVerdicts.length > 0) {
+    issues.push({ severity: 'info', text: `DKIM result: ${dkimVerdicts[0]}.` })
+  } else if (dkimDomains.length > 0) {
+    const aligned = dkimDomains.find(d => domainsAlign(d, fromDomain))
+    issues.push(
+      aligned
+        ? { severity: 'info', text: `DKIM signature present for ${aligned}; a verification result wasn't reported.` }
+        : {
+            severity: 'info',
+            text: `DKIM signed by ${dkimDomains[0]}, not your From domain (${fromDomain || 'unknown'}) — set up branded DKIM for best deliverability.`,
+          }
+    )
+  } else {
+    issues.push({ severity: 'warning', text: 'No DKIM signature found on this email.' })
+  }
+
+  // DMARC
+  const dmarc = authResults(headers, 'dmarc')[0]
+  if (dmarc === 'pass') {
+    issues.push({ severity: 'pass', text: 'DMARC check passed.' })
+  } else if (dmarc === 'fail') {
+    issues.push({ severity: 'warning', text: 'DMARC failed — receiving servers may quarantine or reject this email.' })
+  } else if (dmarc) {
+    issues.push({ severity: 'info', text: `DMARC result: ${dmarc}.` })
+  }
+
+  const notReported: string[] = []
+  if (!spf) notReported.push('SPF')
+  if (!dmarc) notReported.push('DMARC')
+  if (notReported.length > 0) {
+    issues.push({
+      severity: 'info',
+      text: `${notReported.join(' and ')} ${notReported.length > 1 ? "results weren't" : "result wasn't"} reported for this test send.`,
+    })
+  }
+
+  // List-Unsubscribe / one-click (RFC 8058) — Gmail & Yahoo bulk-sender requirement.
+  // Absence on a TEST send is a warning, not critical: some ESPs only add these on live sends.
+  const listUnsub = headers.listUnsubscribe.trim()
+  const oneClick = /list-unsubscribe\s*=\s*one-click/i.test(headers.listUnsubscribePost)
+  const hasHttpsLink = /<https:\/\/[^>]+>/i.test(listUnsub)
+
+  if (!listUnsub) {
+    issues.push({
+      severity: 'warning',
+      text: 'No List-Unsubscribe header on this test send — Gmail/Yahoo require it (plus one-click) for bulk senders. Some ESPs only add it on live sends.',
+    })
+  } else if (!oneClick) {
+    issues.push({
+      severity: 'warning',
+      text: 'List-Unsubscribe is present but one-click unsubscribe (List-Unsubscribe-Post) is missing — required by Gmail/Yahoo for bulk senders.',
+    })
+  } else if (!hasHttpsLink) {
+    issues.push({
+      severity: 'warning',
+      text: 'One-click unsubscribe is declared but List-Unsubscribe has no https link, which RFC 8058 requires.',
+    })
+  } else {
+    issues.push({ severity: 'pass', text: 'List-Unsubscribe with one-click (RFC 8058) is present — meets the Gmail/Yahoo bulk-sender requirement.' })
+  }
+
+  return issues
+}
+
 function sanitiseForJson(str: string): string {
   return str
     .replace(/\\/g, '\\\\')
@@ -331,10 +598,15 @@ function buildDeterministicSections(params: {
   decodedHtml: string
   preheader: string
   collapsedCount: number
+  subject: string
+  visibleText: string
+  headers: EmailHeaders
+  fromDomain: string
 }): Record<SectionName, Issue[]> {
   const {
     mergeTags, duplicateWords, utmCheck, htmlLinksCount,
     altTexts, decodedPlain, decodedHtml, preheader, collapsedCount,
+    subject, visibleText, headers, fromDomain,
   } = params
 
   const hasUnsubscribe = decodedHtml.toLowerCase().includes('unsubscribe')
@@ -384,7 +656,12 @@ function buildDeterministicSections(params: {
       hasPhysicalAddress
         ? { severity: 'pass', text: 'Physical address found in email — CAN-SPAM/GDPR footer requirement met.' }
         : { severity: 'critical', text: 'No physical address detected — required by CAN-SPAM and GDPR.' },
+      ...analyseSubject(subject),
+      analyseSpamTriggers(subject, visibleText),
+      analyseTextImageBalance(visibleText, altTexts.total),
     ],
+
+    'Deliverability': buildDeliverabilityIssues(headers, fromDomain),
 
     'Rendering readiness': [
       decodedPlain.length > 50
@@ -412,6 +689,7 @@ export async function runQA(email: {
   html: string
   plainText: string
   links: string[]
+  headers?: EmailHeaders
 }) {
   const decodedHtml = decodeQP(email.html)
   const decodedPlain = decodeQP(email.plainText)
@@ -430,6 +708,8 @@ export async function runQA(email: {
   const { text: dedupedText, collapsedCount } = collapseDuplicateBlocks(rawTextContent)
   const textContent = truncateAtWordBoundary(dedupedText, 2000)
 
+  const fromDomain = (email.from.match(/@([a-z0-9.\-]+)/i)?.[1] || '').toLowerCase()
+
   const deterministicSections = buildDeterministicSections({
     mergeTags,
     duplicateWords,
@@ -440,6 +720,10 @@ export async function runQA(email: {
     decodedHtml,
     preheader: email.preheader,
     collapsedCount,
+    subject: email.subject,
+    visibleText: dedupedText,
+    headers: email.headers ?? EMPTY_HEADERS,
+    fromDomain,
   })
 
   const safeTextContent = textContent
@@ -475,14 +759,14 @@ Your job is narrow: everything deterministic has ALREADY been checked and catego
 1. A 2-3 sentence overall summary of the email's readiness, in plain prose, using single quotes only — never double quotes inside strings. You may cite the exact figures given to you above; never invent or estimate a figure you were not given.
 2. Any GENUINELY SUBJECTIVE additional findings, one array per section, that a deterministic check cannot make — specifically:
    - "Content & copy": typos, misspellings, missing words, and grammatical errors found by proofreading the email text below, word by word, like a professional proofreader. Quote the exact error. If none found, return an empty array — do not report a "pass" here, that's implied by finding nothing.
-   - "Links & tracking": e.g. a suggestion (severity "info" only — see RULES) to verify SPF/DKIM/DMARC for the sending domain, if relevant. Empty array if nothing to add.
+   - "Links & tracking": e.g. link labels or destinations that look suspicious or misleading. Empty array if nothing to add.
    - "Accessibility": e.g. a suggestion (severity "info" only — see RULES) to check CTA button colour contrast. Empty array if nothing to add.
-   - "Spam signals": subjective spam-trigger wording, tone, excessive punctuation or capitalisation in the subject line or body copy. Empty array if nothing to add.
+   - "Spam signals": subjective wording or tone risk NOT already covered in the ALREADY HANDLED list (capitals, punctuation, fake prefixes and common spam phrases are already checked in code) — e.g. misleading urgency or deceptive claims. Empty array if nothing to add.
    - "Rendering readiness": any subjective rendering nuance not already covered (e.g. preview text length recommendation). Empty array if nothing to add.
 
 RULES:
 - Severity for anything you add must be "critical", "warning", or "info" only — never "pass" (pass is only for the deterministic facts, which are already handled).
-- Severity reflects CONFIDENCE, not importance. Use "warning" or "critical" ONLY for something you can directly confirm from the actual email text/HTML given to you. If you are suggesting something be verified, checked, or double-checked — anything you cannot confirm yourself from what's in front of you (e.g. whether SPF/DKIM/DMARC records are actually published, whether a CTA button's contrast ratio actually passes WCAG) — that is always "info", never "warning" or "critical", no matter how important the underlying issue would be if true.
+- Severity reflects CONFIDENCE, not importance. Use "warning" or "critical" ONLY for something you can directly confirm from the actual email text/HTML given to you. If you are suggesting something be verified, checked, or double-checked — anything you cannot confirm yourself from what's in front of you (e.g. whether a link destination is reputable, whether a CTA button's contrast ratio actually passes WCAG) — that is always "info", never "warning" or "critical", no matter how important the underlying issue would be if true.
 - Keep all issue text under 100 characters.
 - Do not comment on or contradict anything in the ALREADY HANDLED list.
 - It is completely normal and expected for a section's array to be empty — do not invent an issue just to fill it.

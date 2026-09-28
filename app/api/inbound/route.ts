@@ -57,10 +57,37 @@ function extractPreheaderFromHtml(html: string): string {
   return ''
 }
 
+// Builds a lookup of every email header CloudMailin sent us, with names
+// normalised to lowercase_with_underscores (so 'List-Unsubscribe',
+// 'list-unsubscribe' and 'list_unsubscribe' all resolve to the same key).
+// Handles both flat multipart keys — headers[name] and headers[name][0] for
+// repeated headers like DKIM-Signature — and nested JSON payloads.
+function buildHeaderMap(body: Record<string, any>): Record<string, string> {
+  const map: Record<string, string> = {}
+
+  const add = (rawName: string, value: unknown) => {
+    const name = rawName.toLowerCase().replace(/-/g, '_')
+    const text = Array.isArray(value) ? value.join('\n') : String(value ?? '')
+    map[name] = map[name] ? `${map[name]}\n${text}` : text
+  }
+
+  for (const [key, value] of Object.entries(body)) {
+    const m = key.match(/^headers\[([^\]]+)\](?:\[\d*\])?$/)
+    if (m) add(m[1], value)
+  }
+
+  const nested = body.headers
+  if (nested && typeof nested === 'object') {
+    for (const [name, value] of Object.entries(nested)) add(name, value)
+  }
+
+  return map
+}
+
 export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get('content-type') || ''
-    let body: Record<string, string> = {}
+    let body: Record<string, any> = {}
 
     if (contentType.includes('application/json')) {
       body = await req.json()
@@ -115,11 +142,43 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const subject = body['headers[subject]'] || ''
-    const from = body['headers[from]'] || body['envelope[from]'] || ''
-    const replyTo = body['headers[reply-to]'] || ''
+    const headerMap = buildHeaderMap(body)
+
+    const subject = body['headers[subject]'] || headerMap['subject'] || ''
+    const from = body['headers[from]'] || headerMap['from'] || body['envelope[from]'] || ''
+    // CloudMailin's normalised format uses underscores (reply_to); the old lookup
+    // used a hyphen (reply-to) and may never have matched. headerMap handles both.
+    const replyTo = headerMap['reply_to'] || body['headers[reply-to]'] || ''
     const html = body['html'] || ''
     const plainText = body['plain'] || ''
+
+    const envelopeSpfResult =
+      body['envelope[spf][result]'] ||
+      body['envelope[spf]'] ||
+      body.envelope?.spf?.result ||
+      ''
+
+    const emailHeaders = {
+      available: Object.keys(headerMap).length >= 5,
+      listUnsubscribe: headerMap['list_unsubscribe'] || '',
+      listUnsubscribePost: headerMap['list_unsubscribe_post'] || '',
+      authenticationResults: headerMap['authentication_results'] || '',
+      receivedSpf: headerMap['received_spf'] || '',
+      dkimSignature: headerMap['dkim_signature'] || '',
+      envelopeSpfResult: String(envelopeSpfResult),
+    }
+
+    // Diagnostics: shows exactly which headers reached us on each inbound email.
+    console.log('Header keys received:', Object.keys(headerMap).join(', '))
+    console.log('Header capture:', {
+      available: emailHeaders.available,
+      listUnsubscribe: !!emailHeaders.listUnsubscribe,
+      listUnsubscribePost: !!emailHeaders.listUnsubscribePost,
+      authenticationResults: !!emailHeaders.authenticationResults,
+      receivedSpf: !!emailHeaders.receivedSpf,
+      dkimSignature: !!emailHeaders.dkimSignature,
+      envelopeSpfResult: emailHeaders.envelopeSpfResult || '(none)',
+    })
 
     const parsed = parseEmail(html || plainText)
 
@@ -161,7 +220,7 @@ export async function POST(req: NextRequest) {
     console.log('Campaign stored:', campaign.id)
     console.log('Running QA...')
 
-    const qaResult = await runQA({ subject, from, preheader, html, plainText, links })
+    const qaResult = await runQA({ subject, from, preheader, html, plainText, links, headers: emailHeaders })
     console.log('QA complete, score:', qaResult.score)
 
     const { error: reportError } = await supabase

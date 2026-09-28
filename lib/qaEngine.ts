@@ -371,7 +371,7 @@ function buildDeterministicSections(params: {
         ? { severity: 'info', text: 'No content images found in email (tracking pixels excluded).' }
         : altTexts.missing > 0
         ? {
-            severity: 'critical',
+            severity: 'warning',
             text: `${altTexts.missing} of ${altTexts.total} content images are missing alt text entirely. Specifically: ${altTexts.missingSrcs.join(', ')}.`,
           }
         : { severity: 'pass', text: `All ${altTexts.total} content images have alt attributes.` },

@@ -475,8 +475,23 @@ function resolveSpf(headers: EmailHeaders): string | null {
   return m ? m[1].toLowerCase() : null
 }
 
+// The signing domain (d=) can come from two places: the raw DKIM-Signature
+// header, or — more commonly, since this is what receiving servers actually
+// verified against — a 'header.d=' field reported right alongside the
+// dkim= verdict inside Authentication-Results (e.g. the real Omnisend header
+// seen in testing: 'dkim=pass header.d=dkim1.omnisend.email header.s=omni2').
+// Authentication-Results is checked first since it reflects what was
+// actually verified; the raw signature is a fallback when no verdict at all
+// was reported.
 function dkimSigningDomains(headers: EmailHeaders): string[] {
-  return [...headers.dkimSignature.matchAll(/(?:^|[;\s])d=([a-z0-9.\-]+\.[a-z]{2,})/gi)].map(m => m[1].toLowerCase())
+  const fromAuthResults = [...headers.authenticationResults.matchAll(
+    /dkim\s*=\s*[a-z]+[^;]*?header\.d\s*=\s*([a-z0-9.\-]+\.[a-z]{2,})/gi
+  )].map(m => m[1].toLowerCase())
+
+  const fromSignature = [...headers.dkimSignature.matchAll(/(?:^|[;\s])d=([a-z0-9.\-]+\.[a-z]{2,})/gi)]
+    .map(m => m[1].toLowerCase())
+
+  return [...new Set([...fromAuthResults, ...fromSignature])]
 }
 
 function domainsAlign(a: string, b: string): boolean {
@@ -510,20 +525,52 @@ function buildDeliverabilityIssues(headers: EmailHeaders, fromDomain: string): I
     issues.push({ severity: 'info', text: `SPF result: ${spf} — inconclusive.` })
   }
 
-  // DKIM
+  // DKIM — a cryptographic pass is NOT the same as DMARC alignment. A message
+  // signed only by the ESP's own sending domain (e.g. d=mail.esp.com) can
+  // show a clean DKIM pass while still failing DMARC's alignment requirement,
+  // because DMARC needs the signing domain to match (or be a subdomain of)
+  // the visible From domain — not just a valid signature from ANY domain.
+  // So alignment is checked every time DKIM passes, not only as a fallback
+  // when no verdict was reported.
   const dkimVerdicts = authResults(headers, 'dkim')
   const dkimDomains = dkimSigningDomains(headers)
+  const dkimAlignedDomain = dkimDomains.find(d => domainsAlign(d, fromDomain))
+  const dmarc = authResults(headers, 'dmarc')[0]
+
   if (dkimVerdicts.includes('pass')) {
-    issues.push({ severity: 'pass', text: 'DKIM signature verified.' })
+    if (dkimDomains.length === 0) {
+      // Verdict reported but no d= domain available to check alignment against.
+      issues.push({ severity: 'pass', text: 'DKIM signature verified.' })
+    } else if (dkimAlignedDomain) {
+      issues.push({ severity: 'pass', text: `DKIM signature verified and aligned with your From domain (${fromDomain}).` })
+    } else {
+      const signer = dkimDomains[0]
+      if (dmarc === 'pass') {
+        // DMARC's own alignment check already accounts for this — SPF alignment covered it.
+        issues.push({
+          severity: 'info',
+          text: `DKIM passed but is signed by ${signer}, not your From domain (${fromDomain || 'unknown'}) — DMARC still passed via SPF alignment.`,
+        })
+      } else if (dmarc === 'fail') {
+        issues.push({
+          severity: 'warning',
+          text: `DKIM passed but is signed by ${signer}, not your From domain (${fromDomain || 'unknown'}), and DMARC failed — this can push mail to spam or get it rejected.`,
+        })
+      } else {
+        issues.push({
+          severity: 'warning',
+          text: `DKIM passed but is signed by ${signer}, not your From domain (${fromDomain || 'unknown'}) — fails DKIM alignment for DMARC. DMARC's own result wasn't reported, so it's not confirmed whether SPF alignment covers it instead.`,
+        })
+      }
+    }
   } else if (dkimVerdicts.includes('fail')) {
     issues.push({ severity: 'warning', text: "DKIM verification failed — the message signature didn't validate." })
   } else if (dkimVerdicts.length > 0) {
     issues.push({ severity: 'info', text: `DKIM result: ${dkimVerdicts[0]}.` })
   } else if (dkimDomains.length > 0) {
-    const aligned = dkimDomains.find(d => domainsAlign(d, fromDomain))
     issues.push(
-      aligned
-        ? { severity: 'info', text: `DKIM signature present for ${aligned}; a verification result wasn't reported.` }
+      dkimAlignedDomain
+        ? { severity: 'info', text: `DKIM signature present for ${dkimAlignedDomain}; a verification result wasn't reported.` }
         : {
             severity: 'info',
             text: `DKIM signed by ${dkimDomains[0]}, not your From domain (${fromDomain || 'unknown'}) — set up branded DKIM for best deliverability.`,
@@ -534,7 +581,6 @@ function buildDeliverabilityIssues(headers: EmailHeaders, fromDomain: string): I
   }
 
   // DMARC
-  const dmarc = authResults(headers, 'dmarc')[0]
   if (dmarc === 'pass') {
     issues.push({ severity: 'pass', text: 'DMARC check passed.' })
   } else if (dmarc === 'fail') {

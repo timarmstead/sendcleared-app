@@ -268,23 +268,110 @@ function isTrackingPixel(imgTag: string): boolean {
   return false
 }
 
-function extractAltTexts(html: string): { missing: number; total: number; missingSrcs: string[] } {
+interface AltTextResult {
+  missing: number
+  total: number
+  missingSrcs: string[]
+  // Images that are the ONLY content of a link and have alt="". These are not
+  // decorative: the link has no accessible name, so screen readers read out
+  // the raw URL instead.
+  linkedEmpty: number
+  linkedEmptySrcs: string[]
+}
+
+function imageFileName(tag: string): string {
+  const srcMatch = tag.match(/\bsrc=["']([^"']+)["']/i)
+  if (!srcMatch) return '(unknown image)'
+  const src = srcMatch[1]
+  const filename = src.split('/').pop()?.split('?')[0] || src
+  return filename.length > 40 ? filename.substring(0, 37) + '...' : filename
+}
+
+function hasAltAttribute(tag: string): boolean {
+  return /\balt\s*=/i.test(tag)
+}
+
+// True only when alt is present AND quoted-empty (alt="" or alt=''). An
+// unquoted alt value is treated as non-empty.
+function hasEmptyAlt(tag: string): boolean {
+  const m = tag.match(/\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/i)
+  if (!m) return false
+  return (m[1] ?? m[2] ?? '').trim() === ''
+}
+
+function extractAltTexts(html: string): AltTextResult {
   const allImgs = [...html.matchAll(/<img[^>]*>/gi)].map(m => m[0])
   const realImgs = allImgs.filter(tag => !isTrackingPixel(tag))
 
   const total = realImgs.length
-  const missingTags = realImgs.filter(tag => !tag.includes('alt='))
+  const missingTags = realImgs.filter(tag => !hasAltAttribute(tag))
   const missing = missingTags.length
+  const missingSrcs = missingTags.slice(0, 3).map(imageFileName)
 
-  const missingSrcs = missingTags.slice(0, 3).map(tag => {
-    const srcMatch = tag.match(/\bsrc=["']([^"']+)["']/i)
-    if (!srcMatch) return '(unknown image)'
-    const src = srcMatch[1]
-    const filename = src.split('/').pop()?.split('?')[0] || src
-    return filename.length > 40 ? filename.substring(0, 37) + '...' : filename
+  // alt="" is correct for genuinely decorative images, so it is NOT counted as
+  // missing above. But it is wrong on an image that is the only content of a
+  // link. If the link has its own text, alt="" is fine and is not flagged.
+  const linkedEmptyTags: string[] = []
+  for (const a of html.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const inner = a[1]
+    const imgs = [...inner.matchAll(/<img[^>]*>/gi)].map(m => m[0]).filter(t => !isTrackingPixel(t))
+    if (imgs.length === 0) continue
+
+    const linkText = inner.replace(/<[^>]*>/g, '').replace(/&nbsp;|\s+/g, '').trim()
+    if (linkText) continue
+
+    if (imgs.every(hasEmptyAlt)) linkedEmptyTags.push(...imgs)
+  }
+
+  return {
+    missing,
+    total,
+    missingSrcs,
+    linkedEmpty: linkedEmptyTags.length,
+    linkedEmptySrcs: linkedEmptyTags.slice(0, 3).map(imageFileName),
+  }
+}
+
+// Finds a likely "missing link" on a grid tile: an unlinked image that has the
+// same width as a group of linked images (e.g. 7 linked collection tiles plus
+// one unlinked tile of the same size). Headers, logos and banners are normally
+// a different width from tile groups, so they are not flagged. This is a
+// heuristic, so it is reported as 'info', never as a hard failure.
+function findUnlinkedTiles(html: string): { count: number; srcs: string[] } {
+  const anchorRanges = [...html.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)].map(m => [
+    m.index as number,
+    (m.index as number) + m[0].length,
+  ])
+
+  const widthOf = (tag: string): number | null => {
+    const m = tag.match(/\bwidth=["']?(\d+)/i)
+    return m ? parseInt(m[1]) : null
+  }
+
+  const linkedByWidth = new Map<number, number>()
+  const unlinked: { tag: string; width: number }[] = []
+
+  for (const m of html.matchAll(/<img[^>]*>/gi)) {
+    const tag = m[0]
+    if (isTrackingPixel(tag)) continue
+    const width = widthOf(tag)
+    if (width === null) continue
+    const idx = m.index as number
+    const isLinked = anchorRanges.some(([start, end]) => idx > start && idx < end)
+    if (isLinked) linkedByWidth.set(width, (linkedByWidth.get(width) || 0) + 1)
+    else unlinked.push({ tag, width })
+  }
+
+  const unlinkedByWidth = new Map<number, number>()
+  unlinked.forEach(u => unlinkedByWidth.set(u.width, (unlinkedByWidth.get(u.width) || 0) + 1))
+
+  const flagged = unlinked.filter(u => {
+    const linkedCount = linkedByWidth.get(u.width) || 0
+    const unlinkedCount = unlinkedByWidth.get(u.width) || 0
+    return linkedCount >= 2 && unlinkedCount <= linkedCount / 2
   })
 
-  return { missing, total, missingSrcs }
+  return { count: flagged.length, srcs: flagged.slice(0, 3).map(u => imageFileName(u.tag)) }
 }
 
 function checkMergeTags(html: string, plain: string): string[] {
@@ -646,7 +733,8 @@ function buildDeterministicSections(params: {
   duplicateWords: string[]
   utmCheck: { missing: number; total: number; espTracked: boolean }
   htmlLinksCount: number
-  altTexts: { missing: number; total: number; missingSrcs: string[] }
+  altTexts: AltTextResult
+  unlinkedTiles: { count: number; srcs: string[] }
   decodedPlain: string
   decodedHtml: string
   preheader: string
@@ -658,7 +746,7 @@ function buildDeterministicSections(params: {
 }): Record<SectionName, Issue[]> {
   const {
     mergeTags, duplicateWords, utmCheck, htmlLinksCount,
-    altTexts, decodedPlain, decodedHtml, preheader, collapsedCount,
+    altTexts, unlinkedTiles, decodedPlain, decodedHtml, preheader, collapsedCount,
     subject, visibleText, headers, fromDomain,
   } = params
 
@@ -689,17 +777,33 @@ function buildDeterministicSections(params: {
       htmlLinksCount > 0
         ? { severity: 'pass', text: `${htmlLinksCount} links found.` }
         : { severity: 'warning', text: 'No links detected.' },
+      ...(unlinkedTiles.count > 0
+        ? [{
+            severity: 'info',
+            text: `${unlinkedTiles.count} image(s) look like grid tiles but have no link, unlike the matching tiles around them — check if a link is missing. Specifically: ${unlinkedTiles.srcs.join(', ')}.`,
+          } as Issue]
+        : []),
     ],
 
     'Accessibility': [
-      altTexts.total === 0
-        ? { severity: 'info', text: 'No content images found in email (tracking pixels excluded).' }
-        : altTexts.missing > 0
-        ? {
+      ...(altTexts.total === 0
+        ? [{ severity: 'info', text: 'No content images found in email (tracking pixels excluded).' } as Issue]
+        : []),
+      ...(altTexts.missing > 0
+        ? [{
             severity: 'warning',
             text: `${altTexts.missing} of ${altTexts.total} content images are missing alt text entirely. Specifically: ${altTexts.missingSrcs.join(', ')}.`,
-          }
-        : { severity: 'pass', text: `All ${altTexts.total} content images have alt attributes.` },
+          } as Issue]
+        : []),
+      ...(altTexts.linkedEmpty > 0
+        ? [{
+            severity: 'warning',
+            text: `${altTexts.linkedEmpty} linked image(s) have empty alt text, so screen readers will read out the link URL instead. Specifically: ${altTexts.linkedEmptySrcs.join(', ')}.`,
+          } as Issue]
+        : []),
+      ...(altTexts.total > 0 && altTexts.missing === 0 && altTexts.linkedEmpty === 0
+        ? [{ severity: 'pass', text: `All ${altTexts.total} content images have alt attributes.` } as Issue]
+        : []),
     ],
 
     'Spam signals': [
@@ -754,6 +858,7 @@ export async function runQA(email: {
 
   const rawTextContent = extractTextFromHtml(decodedHtml)
   const altTexts = extractAltTexts(decodedHtml)
+  const unlinkedTiles = findUnlinkedTiles(decodedHtml)
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(htmlLinks)
   const duplicateWords = detectDuplicateWords(rawTextContent)
@@ -769,6 +874,7 @@ export async function runQA(email: {
     utmCheck,
     htmlLinksCount: htmlLinks.length,
     altTexts,
+    unlinkedTiles,
     decodedPlain,
     decodedHtml,
     preheader: email.preheader,

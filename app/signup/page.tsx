@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { trackEvent } from '@/lib/analytics'
 
 function SignUpForm() {
   const [firstName, setFirstName] = useState('')
@@ -15,6 +16,7 @@ function SignUpForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const inviteToken = searchParams.get('invite')
+  const plan = searchParams.get('plan')
 
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault()
@@ -25,7 +27,7 @@ function SignUpForm() {
       ? `${window.location.origin}/invite/${inviteToken}`
       : `${window.location.origin}/dashboard`
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -41,6 +43,18 @@ function SignUpForm() {
       setError(error.message)
       setLoading(false)
       return
+    }
+
+    // Count a genuinely new account only. When an email is already registered,
+    // Supabase can return a user with no identities instead of an error, and
+    // that must not be counted as a sign-up.
+    const isNewAccount = !data.user || (data.user.identities?.length ?? 0) > 0
+    if (isNewAccount) {
+      trackEvent('sign_up', {
+        method: 'email',
+        signup_source: inviteToken ? 'invite' : 'direct',
+        ...(plan ? { plan } : {}),
+      })
     }
 
     setConfirmSent(true)

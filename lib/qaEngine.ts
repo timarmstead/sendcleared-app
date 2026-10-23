@@ -123,23 +123,44 @@ function stripHiddenDivs(html: string): string {
   )
 }
 
-function extractTextFromHtml(html: string): string {
+// Shared HTML -> text pipeline. `blockSeparator` is what block-level tags
+// (p, div, td, br, etc.) are replaced with; inline tags are always removed
+// with no separator so mid-word markup doesn't split a word.
+function htmlToText(html: string, blockSeparator: string): string {
   const withoutHiddenAndCode = stripHiddenDivs(html)
     // Comments (incl. Outlook <!--[if mso]> blocks) and <!DOCTYPE> aren't
     // rendered text. The tag regex below only matches tags starting with a
     // letter, so these must be removed first or they leak into the copy.
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<![^>]*>/g, ' ')
+    // Nothing in <head> is rendered copy. This also catches Outlook's
+    // <xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</...> block, whose
+    // bare "96" would otherwise show up as the first "word" of the email.
+    .replace(/<head[\s>][\s\S]*?<\/head>/i, '')
+    .replace(/<xml[^>]*>[\s\S]*?<\/xml>/gi, '')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
 
-  // Replace each tag individually: inline tags -> '', block tags -> ' '.
-  const withTagsReplaced = withoutHiddenAndCode.replace(
+  // Replace each tag individually: inline tags -> '', block tags -> separator.
+  return withoutHiddenAndCode.replace(
     /<\/?([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g,
-    (_match, tagName: string) => (INLINE_TAGS.has(tagName.toLowerCase()) ? '' : ' ')
+    (_match, tagName: string) => (INLINE_TAGS.has(tagName.toLowerCase()) ? '' : blockSeparator)
   )
+}
 
-  return withTagsReplaced.replace(/\s+/g, ' ').trim()
+function extractTextFromHtml(html: string): string {
+  return htmlToText(html, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// The same text, kept as separate chunks of copy (one per block-level
+// element). Used for duplicate-word detection so that a word ending one
+// element and the same word starting the next (a "SHOP PJUR" button followed
+// by a product title that begins "Pjur ...") isn't mistaken for a typo.
+function extractTextBlocks(html: string): string[] {
+  return htmlToText(html, '\n')
+    .split('\n')
+    .map(b => b.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
 }
 
 function truncateAtWordBoundary(text: string, maxLength: number): string {
@@ -408,10 +429,16 @@ function checkUTM(htmlLinks: string[]): {
   return { missing, total, espTracked: false }
 }
 
-function detectDuplicateWords(text: string): string[] {
-  const matches = [...text.matchAll(/\b(\w+)\s+\1\b/gi)]
-  const found = matches.map(m => m[0])
-  return [...new Set(found.map(f => f.toLowerCase()))]
+function detectDuplicateWords(blocks: string[]): string[] {
+  const found: string[] = []
+  for (const block of blocks) {
+    for (const m of block.matchAll(/\b(\w+)\s+\1\b/gi)) {
+      // Repeated numbers ("10 10") aren't a word typo.
+      if (/^\d+$/.test(m[1])) continue
+      found.push(m[0].toLowerCase())
+    }
+  }
+  return [...new Set(found)]
 }
 
 function collapseDuplicateBlocks(text: string): { text: string; collapsedCount: number } {
@@ -861,7 +888,7 @@ export async function runQA(email: {
   const unlinkedTiles = findUnlinkedTiles(decodedHtml)
   const mergeTags = checkMergeTags(decodedHtml, decodedPlain)
   const utmCheck = checkUTM(htmlLinks)
-  const duplicateWords = detectDuplicateWords(rawTextContent)
+  const duplicateWords = detectDuplicateWords(extractTextBlocks(decodedHtml))
 
   const { text: dedupedText, collapsedCount } = collapseDuplicateBlocks(rawTextContent)
   const textContent = truncateAtWordBoundary(dedupedText, 2000)
@@ -917,15 +944,15 @@ export async function runQA(email: {
 Your job is narrow: everything deterministic has ALREADY been checked and categorised (see ALREADY HANDLED below). You are only being asked for:
 1. A 2-3 sentence overall summary of the email's readiness, in plain prose, using single quotes only — never double quotes inside strings. You may cite the exact figures given to you above; never invent or estimate a figure you were not given.
 2. Any GENUINELY SUBJECTIVE additional findings, one array per section, that a deterministic check cannot make — specifically:
-   - "Content & copy": typos, misspellings, missing words, and grammatical errors found by proofreading the email text below, word by word, like a professional proofreader. Quote the exact error. If none found, return an empty array — do not report a "pass" here, that's implied by finding nothing.
+   - "Content & copy": typos, misspellings, missing words, and grammatical errors found by proofreading the email text below, word by word, like a professional proofreader. Quote the exact error. Do NOT report: repeated words that sit in separate parts of the email (e.g. a button label followed by a product name — the text below joins separate blocks with a space), brand or product names, intentional styling or all-caps button labels, numbers, URLs, or anything that looks like code or template syntax. If none found, return an empty array — do not report a "pass" here, that's added automatically.
    - "Links & tracking": e.g. link labels or destinations that look suspicious or misleading. Empty array if nothing to add.
    - "Accessibility": e.g. a suggestion (severity "info" only — see RULES) to check CTA button colour contrast. Empty array if nothing to add.
    - "Spam signals": subjective wording or tone risk NOT already covered in the ALREADY HANDLED list (capitals, punctuation, fake prefixes and common spam phrases are already checked in code) — e.g. misleading urgency or deceptive claims. Empty array if nothing to add.
    - "Rendering readiness": any subjective rendering nuance not already covered (e.g. preview text length recommendation). Empty array if nothing to add.
 
 RULES:
-- Severity for anything you add must be "critical", "warning", or "info" only — never "pass" (pass is only for the deterministic facts, which are already handled).
-- Severity reflects CONFIDENCE, not importance. Use "warning" or "critical" ONLY for something you can directly confirm from the actual email text/HTML given to you. If you are suggesting something be verified, checked, or double-checked — anything you cannot confirm yourself from what's in front of you (e.g. whether a link destination is reputable, whether a CTA button's contrast ratio actually passes WCAG) — that is always "info", never "warning" or "critical", no matter how important the underlying issue would be if true.
+- Severity for anything you add must be "warning" or "info" only — never "critical" and never "pass". Critical is reserved for the deterministic checks in code, because you are reading extracted text, not the rendered email, and can be wrong about it.
+- Severity reflects CONFIDENCE, not importance. Use "warning" ONLY for something you can directly confirm from the actual email text/HTML given to you. If you are suggesting something be verified, checked, or double-checked — anything you cannot confirm yourself from what's in front of you (e.g. whether a link destination is reputable, whether a CTA button's contrast ratio actually passes WCAG) — that is always "info", never "warning", no matter how important the underlying issue would be if true.
 - Keep all issue text under 100 characters.
 - Do not comment on or contradict anything in the ALREADY HANDLED list.
 - It is completely normal and expected for a section's array to be empty — do not invent an issue just to fill it.
@@ -978,9 +1005,26 @@ Return this exact JSON shape:
   // Merge: deterministic issues first, then whatever the model added — and
   // strip anything the model tries to mark "pass", since that severity is
   // reserved for deterministic facts only.
+  const textWasTruncated = dedupedText.length > textContent.length
   const sections = SECTION_NAMES.map(name => {
-    const extra = (modelOutput.extraIssues?.[name] || []).filter(i => i.severity !== 'pass')
+    // Defence in depth: the model may only add warnings and info. Critical
+    // belongs to the deterministic checks, so a model false positive can't
+    // sink a section score on its own.
+    const extra = (modelOutput.extraIssues?.[name] || [])
+      .filter(i => i.severity !== 'pass')
+      .map(i => (i.severity === 'critical' ? { ...i, severity: 'warning' as const } : i))
     const issues = [...deterministicSections[name], ...extra]
+
+    // Proofreading finds nothing -> say so. Without a visible line a clean
+    // email looks as if it was never proofread at all.
+    if (name === 'Content & copy' && extra.length === 0 && textContent.length > 0) {
+      issues.push({
+        severity: 'pass',
+        text: textWasTruncated
+          ? 'Spelling and grammar proofread (first 2,000 characters of copy): no errors found.'
+          : 'Spelling and grammar proofread: no errors found.',
+      })
+    }
     return {
       name,
       score: scoreFromIssues(issues),

@@ -922,7 +922,7 @@ export async function runQA(email: {
   const safePreheader = email.preheader ? sanitiseForJson(email.preheader) : ''
 
   const alreadyHandled = SECTION_NAMES.flatMap(name =>
-    deterministicSections[name].map(issue => `[${name}] ${issue.text}`)
+    deterministicSections[name].map(issue => `[${name}] (${issue.severity.toUpperCase()}) ${issue.text}`)
   ).join('\n')
 
   const meta = [
@@ -942,7 +942,7 @@ export async function runQA(email: {
   const prompt = `You are SendCleared, an expert email marketing QA agent. Return ONLY valid JSON. No markdown, no backticks, no text outside the JSON.
 
 Your job is narrow: everything deterministic has ALREADY been checked and categorised (see ALREADY HANDLED below). You are only being asked for:
-1. A 2-3 sentence overall summary of the email's readiness, in plain prose, using single quotes only — never double quotes inside strings. You may cite the exact figures given to you above; never invent or estimate a figure you were not given.
+1. A 2-3 sentence overall summary of the email's readiness, in plain prose, using single quotes only — never double quotes inside strings. You may cite the exact figures given to you above; never invent or estimate a figure you were not given. Every item in the ALREADY HANDLED list carries its final severity in capitals. When the summary mentions an item, describe it at exactly that severity: use the word 'critical' ONLY for items marked CRITICAL, call WARNING items 'warnings' or 'worth fixing', and treat INFO items as minor notes. Never escalate or soften a severity, and never describe an item as an accessibility, spam or deliverability risk unless it is listed under that section.
 2. Any GENUINELY SUBJECTIVE additional findings, one array per section, that a deterministic check cannot make — specifically:
    - "Content & copy": typos, misspellings, missing words, and grammatical errors found by proofreading the email text below, word by word, like a professional proofreader. Quote the exact error. Do NOT report: repeated words that sit in separate parts of the email (e.g. a button label followed by a product name — the text below joins separate blocks with a space), brand or product names, intentional styling or all-caps button labels, numbers, URLs, or anything that looks like code or template syntax. If none found, return an empty array — do not report a "pass" here, that's added automatically.
    - "Links & tracking": e.g. link labels or destinations that look suspicious or misleading. Empty array if nothing to add.
@@ -1034,9 +1034,21 @@ Return this exact JSON shape:
 
   const score = Math.round(sections.reduce((sum, s) => sum + s.score, 0) / sections.length)
 
+  // The summary is prose from the model, so check it against the final
+  // severities. If nothing is actually critical, the word must not appear —
+  // a "warning" described as "critical" contradicts the report beside it.
+  const criticalCount = sections.reduce(
+    (n, s) => n + s.issues.filter(i => i.severity === 'critical').length,
+    0
+  )
+  const summary =
+    criticalCount === 0
+      ? String(modelOutput.summary ?? '').replace(/\bcritically\b/gi, 'importantly').replace(/\bcritical\b/gi, 'notable')
+      : modelOutput.summary
+
   return {
     score,
-    summary: modelOutput.summary,
+    summary,
     sections,
     ctas,
   }

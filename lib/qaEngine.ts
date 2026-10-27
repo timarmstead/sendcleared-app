@@ -630,7 +630,7 @@ function buildDeliverabilityIssues(headers: EmailHeaders, fromDomain: string): I
   if (spf === 'pass') {
     issues.push({ severity: 'pass', text: 'SPF check passed.' })
   } else if (spf === 'fail' || spf === 'softfail') {
-    issues.push({ severity: 'warning', text: `SPF ${spf} — the sending server isn't authorised by this domain's SPF record.` })
+    issues.push({ severity: 'warning', text: `SPF ${spf} on this test send — the sending server isn't authorised by this domain's SPF record. Test sends can take a different route from live campaigns, so confirm in the headers of a live send.` })
   } else if (spf === 'none') {
     issues.push({ severity: 'warning', text: 'No SPF record found for the sending domain.' })
   } else if (spf === 'permerror') {
